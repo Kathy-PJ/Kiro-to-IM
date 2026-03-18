@@ -262,7 +262,7 @@ async function main(): Promise<void> {
         `       export AWS_ACCESS_KEY_ID=your-key\n` +
         `       export AWS_SECRET_ACCESS_KEY=your-secret\n` +
         `    3. Or use AWS SSO: aws sso login --profile your-profile\n` +
-        `    4. Then restart: /kiro-to-im stop && /kiro-to-im start`,
+        `    4. Then restart: kiro-to-im stop && kiro-to-im start`,
       );
     } else {
       console.error(

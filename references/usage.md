@@ -1,13 +1,13 @@
 # Usage Guide
 
-This skill works via `/kiro-to-im` slash commands or natural language (e.g. "start bridge", "配置", "诊断").
+This skill works via natural language commands (e.g. `kiro-to-im setup`, "start bridge", "配置", "诊断").
 
 ## setup
 
 Interactive wizard that configures the bridge.
 
 ```
-/kiro-to-im setup
+kiro-to-im setup
 ```
 
 The wizard will prompt you for:
@@ -24,7 +24,7 @@ After collecting input, the wizard validates tokens by calling each platform's A
 Example interaction:
 
 ```
-> /kiro-to-im setup
+> kiro-to-im setup
 Checking kiro-cli auth... OK (token file)
 Which channels to enable? telegram,discord
 Enter Telegram bot token: <your-token>
@@ -45,19 +45,19 @@ Config written to ~/.kiro-to-im/config.env
 Starts the bridge daemon in the background.
 
 ```
-/kiro-to-im start
+kiro-to-im start
 ```
 
 The daemon process ID is stored in `~/.kiro-to-im/runtime/bridge.pid`. If the daemon is already running, the command reports the existing process.
 
-If startup fails, run `/kiro-to-im doctor` to diagnose issues.
+If startup fails, run `kiro-to-im doctor` to diagnose issues.
 
 ## stop
 
 Stops the running bridge daemon.
 
 ```
-/kiro-to-im stop
+kiro-to-im stop
 ```
 
 Sends SIGTERM to the daemon process and cleans up the PID file.
@@ -67,7 +67,7 @@ Sends SIGTERM to the daemon process and cleans up the PID file.
 Shows whether the daemon is running and basic health information.
 
 ```
-/kiro-to-im status
+kiro-to-im status
 ```
 
 Output includes:
@@ -81,8 +81,8 @@ Output includes:
 Shows recent log output from the daemon.
 
 ```
-/kiro-to-im logs        # Last 50 lines (default)
-/kiro-to-im logs 200    # Last 200 lines
+kiro-to-im logs        # Last 50 lines (default)
+kiro-to-im logs 200    # Last 200 lines
 ```
 
 Logs are stored in `~/.kiro-to-im/logs/` and are automatically redacted to mask secrets.
@@ -92,14 +92,14 @@ Logs are stored in `~/.kiro-to-im/logs/` and are automatically redacted to mask 
 Interactively update the current configuration.
 
 ```
-/kiro-to-im reconfigure
+kiro-to-im reconfigure
 ```
 
 Displays current settings with secrets masked, then prompts for changes. After updating, you must restart the daemon for changes to take effect:
 
 ```
-/kiro-to-im stop
-/kiro-to-im start
+kiro-to-im stop
+kiro-to-im start
 ```
 
 ## doctor
@@ -107,7 +107,7 @@ Displays current settings with secrets masked, then prompts for changes. After u
 Runs diagnostic checks and reports issues.
 
 ```
-/kiro-to-im doctor
+kiro-to-im doctor
 ```
 
 Checks performed:

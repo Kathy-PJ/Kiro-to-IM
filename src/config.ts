@@ -12,7 +12,10 @@ export interface Config {
   kiroArgs?: string[];
   kiroPoolSize: number;
   // Kiro Auth — one of these methods:
-  //   1. Pre-authenticated: user ran `kiro-cli auth login` beforehand (tokens in ~/.kiro/)
+  //   1. Pre-authenticated: user ran `kiro-cli auth login` beforehand
+  //      (tokens in platform-specific SQLite DB, e.g.
+  //       macOS: ~/Library/Application Support/kiro-cli/data.sqlite3
+  //       Linux: ~/.local/share/kiro-cli/data.sqlite3)
   //   2. AWS credentials: provided here and forwarded to kiro-cli as env vars
   //   3. AWS SSO profile: profile name, user must `aws sso login` beforehand
   kiroAuthMethod?: 'cli' | 'aws-credentials' | 'aws-sso' | 'auto';

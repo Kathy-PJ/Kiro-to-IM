@@ -52,7 +52,7 @@ npm install && npm run build
 ### 1. Setup
 
 ```
-/kiro-to-im setup
+kiro-to-im setup
 ```
 
 The wizard will guide you through:
@@ -64,7 +64,7 @@ The wizard will guide you through:
 ### 2. Start
 
 ```
-/kiro-to-im start
+kiro-to-im start
 ```
 
 ### 3. Chat
@@ -75,13 +75,13 @@ Open your IM app and send a message to your bot. Kiro will respond.
 
 | Command | Description |
 |---|---|
-| `/kiro-to-im setup` | Interactive setup wizard |
-| `/kiro-to-im start` | Start the bridge daemon |
-| `/kiro-to-im stop` | Stop the bridge daemon |
-| `/kiro-to-im status` | Show daemon status |
-| `/kiro-to-im logs [N]` | Show last N log lines (default 50) |
-| `/kiro-to-im reconfigure` | Update config interactively |
-| `/kiro-to-im doctor` | Diagnose issues |
+| `kiro-to-im setup` | Interactive setup wizard |
+| `kiro-to-im start` | Start the bridge daemon |
+| `kiro-to-im stop` | Stop the bridge daemon |
+| `kiro-to-im status` | Show daemon status |
+| `kiro-to-im logs [N]` | Show last N log lines (default 50) |
+| `kiro-to-im reconfigure` | Update config interactively |
+| `kiro-to-im doctor` | Diagnose issues |
 
 ## Configuration
 

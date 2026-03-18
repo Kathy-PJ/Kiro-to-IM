@@ -49,12 +49,12 @@ npm install && npm run build
 
 ### 1. 配置
 ```
-/kiro-to-im setup
+kiro-to-im setup
 ```
 
 ### 2. 启动
 ```
-/kiro-to-im start
+kiro-to-im start
 ```
 
 ### 3. 聊天
@@ -64,13 +64,13 @@ npm install && npm run build
 
 | 命令 | 说明 |
 |---|---|
-| `/kiro-to-im setup` | 交互式配置向导 |
-| `/kiro-to-im start` | 启动桥接守护进程 |
-| `/kiro-to-im stop` | 停止守护进程 |
-| `/kiro-to-im status` | 查看运行状态 |
-| `/kiro-to-im logs [N]` | 查看最近 N 行日志 |
-| `/kiro-to-im reconfigure` | 修改配置 |
-| `/kiro-to-im doctor` | 诊断问题 |
+| `kiro-to-im setup` | 交互式配置向导 |
+| `kiro-to-im start` | 启动桥接守护进程 |
+| `kiro-to-im stop` | 停止守护进程 |
+| `kiro-to-im status` | 查看运行状态 |
+| `kiro-to-im logs [N]` | 查看最近 N 行日志 |
+| `kiro-to-im reconfigure` | 修改配置 |
+| `kiro-to-im doctor` | 诊断问题 |
 
 ## Kiro 特有配置
 

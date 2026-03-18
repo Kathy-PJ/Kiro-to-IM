@@ -36,15 +36,15 @@ To rotate compromised or expired tokens:
 
 1. Revoke the old token on the IM platform
 2. Generate a new token
-3. Run `/kiro-to-im reconfigure` to update the stored credentials
-4. Run `/kiro-to-im stop` then `/kiro-to-im start` to apply changes
+3. Run `kiro-to-im reconfigure` to update the stored credentials
+4. Run `kiro-to-im stop` then `kiro-to-im start` to apply changes
 
 ## Leak Response
 
 If you suspect a token has been leaked:
 
 1. **Immediately revoke** the token on the respective IM platform
-2. Run `/kiro-to-im stop` to halt the daemon
-3. Run `/kiro-to-im reconfigure` with a new token
+2. Run `kiro-to-im stop` to halt the daemon
+3. Run `kiro-to-im reconfigure` with a new token
 4. Review `~/.kiro-to-im/logs/` for unauthorized activity
-5. Run `/kiro-to-im start` with the new credentials
+5. Run `kiro-to-im start` with the new credentials

@@ -24,7 +24,7 @@ You are managing the Kiro-to-IM bridge.
 User data is stored at `~/.kiro-to-im/`.
 
 The skill directory (SKILL_DIR) is at `~/.kiro/skills/kiro-to-im`.
-If that path doesn't exist, fall back to Glob with pattern `**/skills/**/kiro-to-im/SKILL.md` and derive the root from the result.
+If that path doesn't exist, fall back to Glob with pattern `**/skills/**kiro-to-im/SKILL.md` and derive the root from the result.
 
 ## Command parsing
 
@@ -99,7 +99,7 @@ Interactive setup wizard. Collect input one field at a time:
 3. Write `~/.kiro-to-im/config.env`
 4. `chmod 600 ~/.kiro-to-im/config.env`
 5. Validate tokens
-6. On success: "Setup complete! Run `/kiro-to-im start` to start the bridge."
+6. On success: "Setup complete! Run `kiro-to-im start` to start the bridge."
 
 ### `start`
 Run: `bash "SKILL_DIR/scripts/daemon.sh" start`
