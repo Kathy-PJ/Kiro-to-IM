@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.js",
+    "postinstall": "node scripts/patch-cardkit.mjs",
     "typecheck": "tsc --noEmit",
     "dev": "tsx src/main.ts",
     "test": "KTI_HOME=$(mktemp -d) node --test --import tsx --test-timeout=15000 src/__tests__/*.test.ts"
