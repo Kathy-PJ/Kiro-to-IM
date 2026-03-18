@@ -63,11 +63,20 @@ Interactive setup wizard. Collect input one field at a time:
 
 **Step 0 — Verify kiro-cli auth**
 - Run `kiro-cli auth status` (or check `~/.kiro/` token files, or AWS creds)
-- If not authenticated, guide the user:
-  1. `kiro-cli auth login` (opens browser for OAuth)
-  2. Wait for confirmation
-  3. Verify with `kiro-cli auth status`
-- If AWS credentials are detected, inform user and proceed
+- If not authenticated, ask user which method they want:
+  - **Option A: Interactive login** (desktop with browser)
+    1. Run `kiro-cli auth login` (opens browser for OAuth)
+    2. Wait for confirmation
+    3. Verify with `kiro-cli auth status`
+  - **Option B: AWS IAM credentials** (servers, CI)
+    1. Collect AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, optional AWS_REGION
+    2. Store in config.env as KTI_AWS_ACCESS_KEY_ID etc.
+    3. These are forwarded to kiro-cli processes as env vars
+  - **Option C: AWS SSO profile** (enterprise)
+    1. Collect profile name
+    2. Store in config.env as KTI_AWS_PROFILE
+    3. Remind user: must run `aws sso login --profile X` before starting bridge
+- If AWS credentials are detected in env, inform user and proceed
 
 **Step 1 — Choose channels** (telegram, discord, feishu, qq)
 

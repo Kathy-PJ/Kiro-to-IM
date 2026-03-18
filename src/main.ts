@@ -187,6 +187,19 @@ async function main(): Promise<void> {
       `    3. Or configure AWS SSO: aws sso login --profile your-profile`,
     );
   }
+
+  // Build extra env vars for kiro-cli based on auth config
+  const extraEnv: Record<string, string> = {};
+  if (config.awsAccessKeyId) extraEnv.AWS_ACCESS_KEY_ID = config.awsAccessKeyId;
+  if (config.awsSecretAccessKey) extraEnv.AWS_SECRET_ACCESS_KEY = config.awsSecretAccessKey;
+  if (config.awsSessionToken) extraEnv.AWS_SESSION_TOKEN = config.awsSessionToken;
+  if (config.awsRegion) extraEnv.AWS_REGION = config.awsRegion;
+  if (config.awsProfile) extraEnv.AWS_PROFILE = config.awsProfile;
+
+  if (Object.keys(extraEnv).length > 0) {
+    console.log(`[kiro-to-im] Forwarding auth env vars to kiro-cli: ${Object.keys(extraEnv).join(', ')}`);
+  }
+
   const provider = new KiroAcpProvider(
     {
       cmd: kiroCliPath,
@@ -194,6 +207,7 @@ async function main(): Promise<void> {
       poolSize: config.kiroPoolSize,
       cwd: config.defaultWorkDir,
       autoApprove: config.autoApprove ?? false,
+      extraEnv: Object.keys(extraEnv).length > 0 ? extraEnv : undefined,
     },
     pendingPerms,
   );

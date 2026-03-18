@@ -11,6 +11,16 @@ export interface Config {
   kiroCliPath?: string;
   kiroArgs?: string[];
   kiroPoolSize: number;
+  // Kiro Auth — one of these methods:
+  //   1. Pre-authenticated: user ran `kiro-cli auth login` beforehand (tokens in ~/.kiro/)
+  //   2. AWS credentials: provided here and forwarded to kiro-cli as env vars
+  //   3. AWS SSO profile: profile name, user must `aws sso login` beforehand
+  kiroAuthMethod?: 'cli' | 'aws-credentials' | 'aws-sso' | 'auto';
+  awsAccessKeyId?: string;
+  awsSecretAccessKey?: string;
+  awsSessionToken?: string;
+  awsRegion?: string;
+  awsProfile?: string;
   // Telegram
   tgBotToken?: string;
   tgChatId?: string;
@@ -84,6 +94,13 @@ export function loadConfig(): Config {
     kiroCliPath: env.get("KTI_KIRO_CLI_PATH") || undefined,
     kiroArgs: splitCsv(env.get("KTI_KIRO_ARGS")) || ["acp"],
     kiroPoolSize: parseInt(env.get("KTI_KIRO_POOL_SIZE") || "4", 10),
+    // Kiro Auth
+    kiroAuthMethod: (env.get("KTI_KIRO_AUTH_METHOD") || "auto") as Config["kiroAuthMethod"],
+    awsAccessKeyId: env.get("KTI_AWS_ACCESS_KEY_ID") || undefined,
+    awsSecretAccessKey: env.get("KTI_AWS_SECRET_ACCESS_KEY") || undefined,
+    awsSessionToken: env.get("KTI_AWS_SESSION_TOKEN") || undefined,
+    awsRegion: env.get("KTI_AWS_REGION") || undefined,
+    awsProfile: env.get("KTI_AWS_PROFILE") || undefined,
     // Telegram
     tgBotToken: env.get("KTI_TG_BOT_TOKEN") || undefined,
     tgChatId: env.get("KTI_TG_CHAT_ID") || undefined,
@@ -127,6 +144,14 @@ export function saveConfig(config: Config): void {
   out += formatEnvLine("KTI_KIRO_CLI_PATH", config.kiroCliPath);
   out += formatEnvLine("KTI_KIRO_ARGS", config.kiroArgs?.join(","));
   out += formatEnvLine("KTI_KIRO_POOL_SIZE", String(config.kiroPoolSize));
+  // Kiro Auth
+  if (config.kiroAuthMethod && config.kiroAuthMethod !== 'auto')
+    out += formatEnvLine("KTI_KIRO_AUTH_METHOD", config.kiroAuthMethod);
+  out += formatEnvLine("KTI_AWS_ACCESS_KEY_ID", config.awsAccessKeyId);
+  out += formatEnvLine("KTI_AWS_SECRET_ACCESS_KEY", config.awsSecretAccessKey);
+  out += formatEnvLine("KTI_AWS_SESSION_TOKEN", config.awsSessionToken);
+  out += formatEnvLine("KTI_AWS_REGION", config.awsRegion);
+  out += formatEnvLine("KTI_AWS_PROFILE", config.awsProfile);
   // Telegram
   out += formatEnvLine("KTI_TG_BOT_TOKEN", config.tgBotToken);
   out += formatEnvLine("KTI_TG_CHAT_ID", config.tgChatId);

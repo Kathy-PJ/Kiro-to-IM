@@ -50,6 +50,8 @@ export interface KiroProviderConfig {
   cwd?: string;
   /** Auto-approve all permission requests (default: false) */
   autoApprove: boolean;
+  /** Extra environment variables to pass to kiro-cli (e.g. AWS credentials) */
+  extraEnv?: Record<string, string>;
 }
 
 /**
@@ -96,6 +98,7 @@ export class KiroAcpProvider implements LLMProvider {
       args: this.config.args,
       cwd: this.config.cwd,
       autoApprove: this.config.autoApprove,
+      extraEnv: this.config.extraEnv,
     });
 
     // Handle worker exit

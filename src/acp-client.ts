@@ -202,6 +202,8 @@ export interface AcpClientOptions {
   cwd?: string;
   /** Auto-approve permission requests (default: true) */
   autoApprove?: boolean;
+  /** Extra environment variables to pass to the kiro-cli process (e.g. AWS credentials) */
+  extraEnv?: Record<string, string>;
 }
 
 /**
@@ -241,7 +243,7 @@ export class AcpClient extends EventEmitter {
     this.process = spawn(cmd, args, {
       cwd: cwd || process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: { ...process.env, ...(this.options.extraEnv || {}) },
     });
 
     if (!this.process.stdout || !this.process.stdin) {
