@@ -28,10 +28,10 @@ describe('maskSecret', () => {
 
 describe('configToSettings', () => {
   const base: Config = {
-    runtime: 'claude',
     enabledChannels: [],
     defaultWorkDir: '/tmp/test',
     defaultMode: 'code',
+    kiroPoolSize: 4,
   };
 
   it('always sets remote_bridge_enabled to true', () => {
@@ -184,10 +184,10 @@ describe('loadConfig/saveConfig round-trip', () => {
 
   it('configToSettings returns correct defaults', () => {
     const m = configToSettings({
-      runtime: 'claude',
       enabledChannels: [],
       defaultWorkDir: process.cwd(),
       defaultMode: 'code',
+      kiroPoolSize: 4,
     });
     assert.equal(m.get('bridge_telegram_enabled'), 'false');
     assert.equal(m.get('bridge_discord_enabled'), 'false');

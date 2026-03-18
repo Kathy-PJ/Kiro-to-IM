@@ -136,44 +136,37 @@ interface JsonRpcNotification {
 
 type JsonRpcMessage = JsonRpcRequest | JsonRpcResponse | JsonRpcNotification;
 
-// ── LSP Wire Protocol ──
+// ── NDJSON Wire Protocol ──
 
 /**
- * Parse LSP-style framed messages from a buffer.
- * Format: Content-Length: <length>\r\n\r\n<json-body>
+ * Parse newline-delimited JSON (NDJSON) messages from a buffer.
+ *
+ * The ACP protocol (agent-client-protocol crate) uses NDJSON framing:
+ * each JSON-RPC message is a single line terminated by '\n'.
+ * This was verified from the official Rust SDK:
+ *   https://github.com/agentclientprotocol/rust-sdk/blob/main/src/agent-client-protocol/src/rpc.rs
+ *
+ * Reading: BufReader::read_line() → parse JSON
+ * Writing: serde_json::to_writer() → append '\n' → flush
  */
 class MessageBuffer {
-  private buffer = Buffer.alloc(0);
+  private buffer = '';
 
   append(data: Buffer): JsonRpcMessage[] {
-    this.buffer = Buffer.concat([this.buffer, data]);
+    this.buffer += data.toString('utf-8');
     const messages: JsonRpcMessage[] = [];
 
-    while (true) {
-      const headerEnd = this.buffer.indexOf('\r\n\r\n');
-      if (headerEnd === -1) break;
+    let newlineIdx: number;
+    while ((newlineIdx = this.buffer.indexOf('\n')) !== -1) {
+      const line = this.buffer.slice(0, newlineIdx).trim();
+      this.buffer = this.buffer.slice(newlineIdx + 1);
 
-      const headerStr = this.buffer.subarray(0, headerEnd).toString('utf-8');
-      const match = headerStr.match(/Content-Length:\s*(\d+)/i);
-      if (!match) {
-        // Skip malformed header
-        this.buffer = this.buffer.subarray(headerEnd + 4);
-        continue;
-      }
-
-      const contentLength = parseInt(match[1], 10);
-      const messageStart = headerEnd + 4;
-      const messageEnd = messageStart + contentLength;
-
-      if (this.buffer.length < messageEnd) break; // Incomplete message
-
-      const body = this.buffer.subarray(messageStart, messageEnd).toString('utf-8');
-      this.buffer = this.buffer.subarray(messageEnd);
+      if (!line) continue; // Skip empty lines
 
       try {
-        messages.push(JSON.parse(body) as JsonRpcMessage);
+        messages.push(JSON.parse(line) as JsonRpcMessage);
       } catch {
-        // Skip malformed JSON
+        // Skip malformed JSON lines
       }
     }
 
@@ -182,13 +175,11 @@ class MessageBuffer {
 }
 
 /**
- * Encode a JSON-RPC message with LSP-style framing.
+ * Encode a JSON-RPC message as NDJSON (single line + newline).
  */
 function encodeMessage(msg: JsonRpcMessage): Buffer {
-  const body = JSON.stringify(msg);
-  const bodyBuf = Buffer.from(body, 'utf-8');
-  const header = `Content-Length: ${bodyBuf.length}\r\n\r\n`;
-  return Buffer.concat([Buffer.from(header, 'utf-8'), bodyBuf]);
+  const line = JSON.stringify(msg) + '\n';
+  return Buffer.from(line, 'utf-8');
 }
 
 // ── ACP Client ──
