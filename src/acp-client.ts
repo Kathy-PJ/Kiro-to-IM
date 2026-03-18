@@ -269,10 +269,19 @@ export class AcpClient extends EventEmitter {
     // Handle process exit
     this.process.on('exit', (code, signal) => {
       this.emit('exit', code, signal);
+      // Check stderr for auth-related failures
+      const authError = this.detectAuthError();
       // Reject all pending requests
       for (const [id, pending] of this.pendingRequests) {
-        pending.reject(new Error(`kiro-cli process exited (code: ${code}, signal: ${signal})`));
+        const baseMsg = `kiro-cli process exited (code: ${code}, signal: ${signal})`;
+        const errMsg = authError
+          ? `${baseMsg} — Authentication error: ${authError}`
+          : baseMsg;
+        pending.reject(new Error(errMsg));
         this.pendingRequests.delete(id);
+      }
+      if (authError) {
+        this.emit('auth_error', authError);
       }
     });
 
@@ -435,6 +444,31 @@ export class AcpClient extends EventEmitter {
   }
 
   // ── Private Methods ──
+
+  /**
+   * Scan stderr buffer for authentication-related error patterns.
+   * Returns a human-readable auth error description, or null if none detected.
+   */
+  private detectAuthError(): string | null {
+    const stderr = this.stderrBuf.toLowerCase();
+    const patterns: Array<{ pattern: RegExp; message: string }> = [
+      { pattern: /not\s+logged\s+in/i, message: 'Not logged in. Run: kiro-cli auth login' },
+      { pattern: /token\s+(expired|invalid)/i, message: 'Auth token expired. Run: kiro-cli auth login' },
+      { pattern: /unauthorized|401/i, message: 'Unauthorized (HTTP 401). Re-authenticate with: kiro-cli auth login' },
+      { pattern: /forbidden|403/i, message: 'Forbidden (HTTP 403). Check your account permissions.' },
+      { pattern: /credential/i, message: 'Credential error. Check AWS credentials or run: kiro-cli auth login' },
+      { pattern: /aws.*sso.*expired/i, message: 'AWS SSO session expired. Run: aws sso login' },
+      { pattern: /no\s+valid\s+credential/i, message: 'No valid credentials found. Run: kiro-cli auth login' },
+      { pattern: /signin|sign\s*in/i, message: 'Sign-in required. Run: kiro-cli auth login' },
+    ];
+
+    for (const { pattern, message } of patterns) {
+      if (pattern.test(stderr)) {
+        return message;
+      }
+    }
+    return null;
+  }
 
   private sendRequest<T>(method: string, params?: unknown): Promise<T> {
     return new Promise((resolve, reject) => {

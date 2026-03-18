@@ -91,6 +91,47 @@ if [ -n "$KIRO_PATH" ] && [ -x "$KIRO_PATH" ]; then
   fi
 fi
 
+# --- kiro-cli authentication ---
+if [ -n "$KIRO_PATH" ] && [ -x "$KIRO_PATH" ]; then
+  KIRO_AUTH=1
+  KIRO_AUTH_METHOD=""
+
+  # Strategy 1: kiro-cli auth status
+  AUTH_OUT=$("$KIRO_PATH" auth status 2>&1 || true)
+  if echo "$AUTH_OUT" | grep -qiE 'logged.in|authenticated|valid'; then
+    KIRO_AUTH=0
+    KIRO_AUTH_METHOD="kiro-cli auth status"
+  fi
+
+  # Strategy 2: Token files in ~/.kiro/
+  if [ "$KIRO_AUTH" = "1" ]; then
+    for tokfile in "$HOME/.kiro/credentials" "$HOME/.kiro/token" "$HOME/.kiro/auth.json" "$HOME/.kiro/session.json"; do
+      if [ -f "$tokfile" ] && [ -s "$tokfile" ]; then
+        KIRO_AUTH=0
+        KIRO_AUTH_METHOD="token file: $tokfile"
+        break
+      fi
+    done
+  fi
+
+  # Strategy 3: AWS credentials
+  if [ "$KIRO_AUTH" = "1" ]; then
+    if [ -n "${AWS_ACCESS_KEY_ID:-}" ] || [ -n "${AWS_SESSION_TOKEN:-}" ] || [ -n "${AWS_PROFILE:-}" ]; then
+      KIRO_AUTH=0
+      KIRO_AUTH_METHOD="AWS env vars"
+    elif [ -f "$HOME/.aws/credentials" ] && [ -s "$HOME/.aws/credentials" ]; then
+      KIRO_AUTH=0
+      KIRO_AUTH_METHOD="~/.aws/credentials"
+    fi
+  fi
+
+  if [ "$KIRO_AUTH" = "0" ]; then
+    check "Kiro authentication ($KIRO_AUTH_METHOD)" 0
+  else
+    check "Kiro authentication (not detected — run 'kiro-cli auth login' or configure AWS credentials)" 1
+  fi
+fi
+
 # --- dist/daemon.mjs freshness ---
 DAEMON_MJS="$SKILL_DIR/dist/daemon.mjs"
 if [ -f "$DAEMON_MJS" ]; then

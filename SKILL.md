@@ -43,6 +43,10 @@ Parse the user's intent from `$ARGUMENTS` into one of these subcommands:
 ## Prerequisites
 
 - **kiro-cli** installed and available in PATH (supports `kiro-cli acp` mode)
+- **kiro-cli authenticated** — one of:
+  - `kiro-cli auth login` (interactive OAuth — recommended)
+  - AWS credentials (env vars or `~/.aws/credentials`)
+  - AWS SSO (`aws sso login --profile your-profile`)
 - **Node.js >= 20**
 
 ## Config check
@@ -56,6 +60,14 @@ Before running any subcommand other than `setup`, check if `~/.kiro-to-im/config
 ### `setup`
 
 Interactive setup wizard. Collect input one field at a time:
+
+**Step 0 — Verify kiro-cli auth**
+- Run `kiro-cli auth status` (or check `~/.kiro/` token files, or AWS creds)
+- If not authenticated, guide the user:
+  1. `kiro-cli auth login` (opens browser for OAuth)
+  2. Wait for confirmation
+  3. Verify with `kiro-cli auth status`
+- If AWS credentials are detected, inform user and proceed
 
 **Step 1 — Choose channels** (telegram, discord, feishu, qq)
 
