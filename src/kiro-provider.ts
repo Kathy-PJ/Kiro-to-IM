@@ -122,8 +122,8 @@ export class KiroAcpProvider implements LLMProvider {
       ]);
 
       console.log(
-        `[kiro-provider] Worker-${idx} ready: agent=${JSON.stringify(initResp.agent_info)}, ` +
-        `protocol=${initResp.protocol_version}`
+        `[kiro-provider] Worker-${idx} ready: agent=${JSON.stringify(initResp.agentInfo)}, ` +
+        `protocol=${initResp.protocolVersion}`
       );
 
       if (this.workers[idx]) {
@@ -263,15 +263,15 @@ export class KiroAcpProvider implements LLMProvider {
               client.removeAllListeners('permission_request');
               client.on('permission_request', async (req: {
                 id: number;
-                options: Array<{ option_id: string; label: string; kind: string }>;
-                tool_name?: string;
+                options: Array<{ optionId: string; label: string; kind: string }>;
+                toolName?: string;
                 description?: string;
               }) => {
                 // Emit permission_request SSE for the bridge
                 const toolUseId = `perm-${req.id}`;
                 controller.enqueue(sseEvent('permission_request', {
                   permissionRequestId: toolUseId,
-                  toolName: req.tool_name || 'unknown_tool',
+                  toolName: req.toolName || 'unknown_tool',
                   toolInput: { description: req.description },
                   suggestions: req.options.map((o: { label: string }) => o.label),
                 }));
@@ -285,7 +285,7 @@ export class KiroAcpProvider implements LLMProvider {
                     o.kind === 'allow_always' || o.kind === 'allow_once'
                   ) || req.options[0];
                   if (allowOption) {
-                    client.resolvePermission(req.id, allowOption.option_id);
+                    client.resolvePermission(req.id, allowOption.optionId);
                   }
                 } else {
                   // Find reject option
@@ -293,7 +293,7 @@ export class KiroAcpProvider implements LLMProvider {
                     o.kind === 'reject_once' || o.kind === 'reject_always'
                   ) || req.options[req.options.length - 1];
                   if (denyOption) {
-                    client.resolvePermission(req.id, denyOption.option_id);
+                    client.resolvePermission(req.id, denyOption.optionId);
                   }
                 }
               });

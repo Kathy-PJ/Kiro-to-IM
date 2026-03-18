@@ -28,23 +28,23 @@ export interface AgentCapabilities {
 }
 
 export interface InitializeResponse {
-  protocol_version: string;
-  agent_info: Implementation;
-  agent_capabilities: AgentCapabilities;
+  protocolVersion: string;
+  agentInfo: Implementation;
+  agentCapabilities: AgentCapabilities;
 }
 
 export interface NewSessionResponse {
-  session_id: string;
+  sessionId: string;
 }
 
 export interface LoadSessionResponse {
-  session_id: string;
+  sessionId: string;
 }
 
 export type StopReason = 'end_turn' | 'max_tokens' | 'tool_use' | 'error';
 
 export interface PromptResponse {
-  stop_reason: StopReason;
+  stopReason: StopReason;
 }
 
 // Content blocks
@@ -56,54 +56,54 @@ export interface TextContent {
 export interface ImageContent {
   type: 'image';
   data: string; // base64
-  mime_type: string;
+  mimeType: string;
 }
 
 export interface ResourceLink {
   type: 'resource_link';
   name: string;
   uri: string;
-  mime_type?: string;
+  mimeType?: string;
 }
 
 export type ContentBlock = TextContent | ImageContent | ResourceLink;
 
 // Permission types
 export interface PermissionOption {
-  option_id: string;
+  optionId: string;
   label: string;
   kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
 }
 
 export interface PermissionRequest {
   options: PermissionOption[];
-  tool_name?: string;
+  toolName?: string;
   description?: string;
 }
 
 export interface PermissionResponse {
   outcome: {
     type: 'selected';
-    option_id: string;
+    optionId: string;
   };
 }
 
 // Session notification types
 export interface AgentMessageChunk {
-  type: 'agent_message_chunk';
+  type: 'agentMessageChunk';
   content: ContentBlock;
 }
 
 export interface ToolCallNotification {
-  type: 'tool_call';
-  tool_call_id: string;
+  type: 'toolCall';
+  toolCallId: string;
   title: string;
 }
 
 export type SessionUpdate = AgentMessageChunk | ToolCallNotification | { type: string };
 
 export interface SessionNotification {
-  session_id: string;
+  sessionId: string;
   update: SessionUpdate;
 }
 
@@ -283,9 +283,10 @@ export class AcpClient extends EventEmitter {
     });
 
     // Initialize ACP connection
+    // Method: "initialize", params: { protocolVersion, clientInfo }
     const initResult = await this.sendRequest<InitializeResponse>('initialize', {
-      protocol_version: '2025-01-01',
-      client_info: {
+      protocolVersion: '2025-01-01',
+      clientInfo: {
         name: 'kiro-to-im',
         version: '0.1.0',
       },
@@ -297,27 +298,30 @@ export class AcpClient extends EventEmitter {
 
   /**
    * Create a new ACP session.
+   * Method: "sessions/new", params: { cwd }
    */
   async newSession(cwd: string): Promise<string> {
-    const result = await this.sendRequest<NewSessionResponse>('new_session', {
-      working_directory: cwd,
+    const result = await this.sendRequest<NewSessionResponse>('sessions/new', {
+      cwd,
     });
-    return result.session_id;
+    return result.sessionId;
   }
 
   /**
    * Load (resume) an existing ACP session.
+   * Method: "sessions/load", params: { sessionId, cwd }
    */
   async loadSession(sessionId: string, cwd: string): Promise<string> {
-    const result = await this.sendRequest<LoadSessionResponse>('load_session', {
-      session_id: sessionId,
-      working_directory: cwd,
+    const result = await this.sendRequest<LoadSessionResponse>('sessions/load', {
+      sessionId,
+      cwd,
     });
-    return result.session_id;
+    return result.sessionId;
   }
 
   /**
    * Send a prompt and return a stream event receiver.
+   * Method: "sessions/prompt", params: { sessionId, prompt: ContentBlock[] }
    * The returned async iterable yields StreamEvents until the prompt completes.
    */
   async prompt(sessionId: string, content: ContentBlock[]): Promise<AsyncIterable<StreamEvent>> {
@@ -349,20 +353,20 @@ export class AcpClient extends EventEmitter {
     this.once('prompt_done', onPromptDone);
 
     // Send the prompt request (don't await — we want to start consuming events immediately)
-    const promptPromise = this.sendRequest<PromptResponse>('prompt', {
-      session_id: sessionId,
-      content: content.map(block => {
+    const promptPromise = this.sendRequest<PromptResponse>('sessions/prompt', {
+      sessionId,
+      prompt: content.map(block => {
         switch (block.type) {
           case 'text':
             return { type: 'text', text: block.text };
           case 'image':
-            return { type: 'image', data: block.data, mime_type: block.mime_type };
+            return { type: 'image', data: block.data, mimeType: block.mimeType };
           case 'resource_link':
             return {
               type: 'resource_link',
               name: block.name,
               uri: block.uri,
-              ...(block.mime_type ? { mime_type: block.mime_type } : {}),
+              ...(block.mimeType ? { mimeType: block.mimeType } : {}),
             };
           default:
             return block;
@@ -535,18 +539,19 @@ export class AcpClient extends EventEmitter {
 
   private handleAgentRequest(request: JsonRpcRequest): void {
     switch (request.method) {
-      case 'request_permission': {
+      case 'request_permission':
+      case 'requestPermission': {
         const params = request.params as PermissionRequest;
         if (this.options.autoApprove) {
           // Auto-approve: prefer AllowAlways > AllowOnce > first option
           const option = this.selectBestPermissionOption(params.options);
           if (option) {
             this.sendResponse(request.id, {
-              outcome: { type: 'selected', option_id: option.option_id },
+              outcome: { type: 'selected', optionId: option.optionId },
             });
           } else {
             this.sendResponse(request.id, {
-              outcome: { type: 'selected', option_id: params.options[0]?.option_id ?? '' },
+              outcome: { type: 'selected', optionId: params.options[0]?.optionId ?? '' },
             });
           }
         } else {
@@ -573,16 +578,17 @@ export class AcpClient extends EventEmitter {
 
   private handleAgentNotification(notification: JsonRpcNotification): void {
     switch (notification.method) {
-      case 'session_notification': {
+      case 'session_notification':
+      case 'sessionNotification': {
         const params = notification.params as SessionNotification;
         const update = params.update;
 
-        if (update.type === 'agent_message_chunk') {
+        if (update.type === 'agentMessageChunk') {
           const chunk = update as AgentMessageChunk;
           if (chunk.content.type === 'text') {
             this.emit('stream_event', { type: 'text', text: chunk.content.text } as StreamEvent);
           }
-        } else if (update.type === 'tool_call') {
+        } else if (update.type === 'toolCall') {
           const tc = update as ToolCallNotification;
           const title = tc.title || 'Tool call';
           this.emit('stream_event', { type: 'tool_call', title } as StreamEvent);
@@ -600,7 +606,7 @@ export class AcpClient extends EventEmitter {
    */
   resolvePermission(requestId: number, optionId: string): void {
     this.sendResponse(requestId, {
-      outcome: { type: 'selected', option_id: optionId },
+      outcome: { type: 'selected', optionId },
     });
   }
 
@@ -624,9 +630,9 @@ export function textBlock(text: string): ContentBlock {
 }
 
 export function imageBlock(data: string, mimeType: string): ContentBlock {
-  return { type: 'image', data, mime_type: mimeType } as ImageContent;
+  return { type: 'image', data, mimeType } as ImageContent;
 }
 
 export function resourceLinkBlock(name: string, uri: string, mimeType?: string): ContentBlock {
-  return { type: 'resource_link', name, uri, ...(mimeType ? { mime_type: mimeType } : {}) } as ResourceLink;
+  return { type: 'resource_link', name, uri, ...(mimeType ? { mimeType } : {}) } as ResourceLink;
 }
