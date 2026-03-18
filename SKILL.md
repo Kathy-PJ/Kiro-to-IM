@@ -96,7 +96,52 @@ Interactive setup wizard. Collect input one field at a time:
 **Step 4 — Write config and validate**
 1. Show summary (secrets masked)
 2. Create directory: `mkdir -p ~/.kiro-to-im/{data,logs,runtime,data/messages}`
-3. Write `~/.kiro-to-im/config.env`
+3. Write `~/.kiro-to-im/config.env` using **exactly** these key names:
+   ```env
+   # Required
+   KTI_ENABLED_CHANNELS=feishu           # comma-separated: telegram,discord,feishu,qq
+   KTI_DEFAULT_WORKDIR=/home/user        # working directory for Kiro agent
+   KTI_DEFAULT_MODE=code                 # code, plan, or ask
+
+   # Kiro CLI (all optional)
+   KTI_KIRO_CLI_PATH=/usr/local/bin/kiro-cli  # omit to auto-detect
+   KTI_KIRO_ARGS=acp                          # kiro-cli arguments
+   KTI_KIRO_POOL_SIZE=4                       # worker pool size
+
+   # Kiro Auth (optional — only if using AWS credentials)
+   KTI_AWS_ACCESS_KEY_ID=AKIA...
+   KTI_AWS_SECRET_ACCESS_KEY=...
+   KTI_AWS_REGION=us-east-1
+   KTI_AWS_PROFILE=my-profile
+
+   # Telegram
+   KTI_TG_BOT_TOKEN=bot123:abc
+   KTI_TG_CHAT_ID=99999
+   KTI_TG_ALLOWED_USERS=user1,user2
+
+   # Discord
+   KTI_DISCORD_BOT_TOKEN=...
+   KTI_DISCORD_ALLOWED_USERS=...
+   KTI_DISCORD_ALLOWED_CHANNELS=...
+   KTI_DISCORD_ALLOWED_GUILDS=...
+
+   # Feishu
+   KTI_FEISHU_APP_ID=cli_xxx
+   KTI_FEISHU_APP_SECRET=xxx
+   KTI_FEISHU_DOMAIN=https://open.feishu.cn
+   KTI_FEISHU_ALLOWED_USERS=...
+
+   # QQ
+   KTI_QQ_APP_ID=...
+   KTI_QQ_APP_SECRET=...
+   KTI_QQ_ALLOWED_USERS=...
+   KTI_QQ_IMAGE_ENABLED=true
+   KTI_QQ_MAX_IMAGE_SIZE=20
+
+   # Permission
+   KTI_AUTO_APPROVE=true                 # auto-approve tool calls (no IM confirmation)
+   ```
+   **IMPORTANT**: Key names must match EXACTLY. Do NOT use shortened names like `KTI_CHANNELS` — use `KTI_ENABLED_CHANNELS`.
 4. `chmod 600 ~/.kiro-to-im/config.env`
 5. Validate tokens
 6. On success: "Setup complete! Run `kiro-to-im start` to start the bridge."
