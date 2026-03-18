@@ -582,19 +582,23 @@ export class AcpClient extends EventEmitter {
 
   private handleAgentNotification(notification: JsonRpcNotification): void {
     switch (notification.method) {
+      case 'session/update':
       case 'session_notification':
       case 'sessionNotification': {
-        const params = notification.params as SessionNotification;
-        const update = params.update;
+        const params = notification.params as Record<string, unknown>;
+        // kiro-cli v1.27.2 uses { sessionUpdate: "agent_message_chunk", content: {...} }
+        // Official ACP schema uses { update: { type: "agentMessageChunk", content: {...} } }
+        // Handle both formats:
+        const update = (params.update as Record<string, unknown>) || params;
+        const updateType = (update.sessionUpdate as string) || (update.type as string) || '';
 
-        if (update.type === 'agentMessageChunk') {
-          const chunk = update as AgentMessageChunk;
-          if (chunk.content.type === 'text') {
-            this.emit('stream_event', { type: 'text', text: chunk.content.text } as StreamEvent);
+        if (updateType === 'agent_message_chunk' || updateType === 'agentMessageChunk') {
+          const content = update.content as Record<string, unknown>;
+          if (content?.type === 'text') {
+            this.emit('stream_event', { type: 'text', text: content.text as string } as StreamEvent);
           }
-        } else if (update.type === 'toolCall') {
-          const tc = update as ToolCallNotification;
-          const title = tc.title || 'Tool call';
+        } else if (updateType === 'tool_call' || updateType === 'toolCall') {
+          const title = (update.title as string) || 'Tool call';
           this.emit('stream_event', { type: 'tool_call', title } as StreamEvent);
         }
         break;
