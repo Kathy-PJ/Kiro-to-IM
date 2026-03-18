@@ -8,12 +8,14 @@
 
 1. Run `/kiro-to-im doctor` to identify the issue
 2. Check that Node.js >= 20 is installed: `node --version`
-3. Check that Claude Code CLI is available: `claude --version`
-4. Verify config exists: `ls -la ~/.kiro-to-im/config.env`
-5. Check logs for startup errors: `/kiro-to-im logs`
+3. Check that kiro-cli is available: `kiro-cli --version`
+4. Check kiro-cli auth: `kiro-cli auth status`
+5. Verify config exists: `ls -la ~/.kiro-to-im/config.env`
+6. Check logs for startup errors: `/kiro-to-im logs`
 
 **Common causes**:
 - Missing or invalid config.env -- run `/kiro-to-im setup`
+- kiro-cli not authenticated -- run `kiro-cli auth login`
 - Node.js not found or wrong version -- install Node.js >= 20
 - Port or resource conflict -- check if another instance is running with `/kiro-to-im status`
 
@@ -32,13 +34,13 @@
 
 ## Permission timeout
 
-**Symptoms**: Claude Code session starts but times out waiting for tool approval.
+**Symptoms**: Kiro agent session starts but times out waiting for tool approval.
 
 **Steps**:
 
-1. The bridge runs Claude Code in non-interactive mode; ensure your Claude Code configuration allows the necessary tools
-2. Consider using `--allowedTools` in your configuration to pre-approve common tools
-3. Check network connectivity if the timeout occurs during API calls
+1. The bridge runs kiro-cli via ACP protocol; if tool approval is required in IM, ensure `KTI_AUTO_APPROVE=true` is set in config.env for unattended operation
+2. Check network connectivity if the timeout occurs during API calls
+3. Verify kiro-cli auth hasn't expired: `kiro-cli auth status`
 
 ## High memory usage
 
@@ -52,7 +54,7 @@
    /kiro-to-im stop
    /kiro-to-im start
    ```
-3. If the issue persists, check how many concurrent sessions are active -- each Claude Code session consumes memory
+3. If the issue persists, reduce pool size (`KTI_KIRO_POOL_SIZE`) -- each kiro-cli worker consumes memory
 4. Review logs for error loops that may cause memory leaks
 
 ## Stale PID file

@@ -1,10 +1,10 @@
 {
-  "skill_name": "claude-to-im",
+  "skill_name": "kiro-to-im",
   "evals": [
     {
       "id": 1,
-      "prompt": "帮我设置 Telegram 机器人，我想用手机给 Claude 发消息",
-      "expected_output": "Should trigger the skill, identify 'setup' subcommand, read setup-guides.md, and start the interactive Telegram setup wizard asking for Bot Token",
+      "prompt": "帮我设置 Telegram 机器人，我想用手机给 Kiro 发消息",
+      "expected_output": "Should trigger the skill, identify 'setup' subcommand, check kiro-cli auth, read setup-guides.md, and start the interactive Telegram setup wizard asking for Bot Token",
       "files": []
     },
     {
@@ -16,7 +16,7 @@
     {
       "id": 3,
       "prompt": "桥接服务好像挂了，帮我看看怎么回事",
-      "expected_output": "Should trigger the skill, identify 'doctor' subcommand, and run doctor.sh to diagnose issues",
+      "expected_output": "Should trigger the skill, identify 'doctor' subcommand, and run doctor.sh to diagnose issues including kiro-cli auth",
       "files": []
     },
     {

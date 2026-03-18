@@ -80,7 +80,7 @@ Interactive setup wizard. Collect input one field at a time:
 
 **Step 1 — Choose channels** (telegram, discord, feishu, qq)
 
-**Step 2 — Collect tokens per channel** (same as Claude-to-IM)
+**Step 2 — Collect tokens per channel**
 
 **Step 3 — Kiro settings**
 - **kiro-cli path** (optional, auto-detected from PATH)

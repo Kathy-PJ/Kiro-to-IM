@@ -145,8 +145,8 @@ function Install-WinSWService {
     @"
 <service>
   <id>$ServiceName</id>
-  <name>Claude-to-IM Bridge</name>
-  <description>Claude-to-IM bridge daemon</description>
+  <name>Kiro-to-IM Bridge</name>
+  <description>Kiro-to-IM bridge daemon</description>
   <executable>$nodePath</executable>
   <arguments>$DaemonMjs</arguments>
   <workingdirectory>$SkillDir</workingdirectory>
@@ -198,7 +198,7 @@ function Install-NSSMService {
     & $NSSMPath set $ServiceName AppStderr $LogFile
     & $NSSMPath set $ServiceName AppStdoutCreationDisposition 4
     & $NSSMPath set $ServiceName AppStderrCreationDisposition 4
-    & $NSSMPath set $ServiceName Description "Claude-to-IM bridge daemon"
+    & $NSSMPath set $ServiceName Description "Kiro-to-IM bridge daemon"
     & $NSSMPath set $ServiceName AppRestartDelay 10000
     & $NSSMPath set $ServiceName AppEnvironmentExtra "USERPROFILE=$env:USERPROFILE" "APPDATA=$env:APPDATA" "LOCALAPPDATA=$env:LOCALAPPDATA" "KTI_HOME=$KtiHome"
 
