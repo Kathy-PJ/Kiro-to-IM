@@ -75,18 +75,50 @@ function resolveKiroCliPath(): string {
 /**
  * Pre-flight check: verify kiro-cli is authenticated before starting workers.
  *
- * Kiro uses AWS-backed authentication. The CLI stores tokens in ~/.kiro/.
+ * Kiro CLI stores auth tokens in a SQLite database, NOT plain text files.
+ * The database location is platform-specific:
+ *   - macOS:  ~/Library/Application Support/kiro-cli/data.sqlite3
+ *   - Linux:  ~/.local/share/kiro-cli/data.sqlite3
+ *   - Windows: %APPDATA%/kiro-cli/data.sqlite3
+ *
  * Common auth methods:
- *   - `kiro-cli auth login` (interactive OAuth)
- *   - AWS SSO / IAM credentials
+ *   - `kiro-cli auth login` (interactive OAuth → tokens stored in SQLite DB)
+ *   - AWS SSO / IAM credentials (env vars or ~/.aws/)
  *   - Environment variables (AWS_ACCESS_KEY_ID, etc.)
  *
- * We try multiple detection strategies:
- *   1. `kiro-cli auth status` (if supported)
- *   2. Check for ~/.kiro/ token files
- *   3. Check for AWS credentials
- *   4. Dry-run ACP initialize as final validation
+ * Detection strategies (in order):
+ *   1. `kiro-cli auth status` (if the subcommand exists)
+ *   2. Check for kiro-cli SQLite database file (platform-specific paths)
+ *   3. Check for AWS credentials (env vars or ~/.aws/credentials)
+ *   4. Let ACP initialize handshake be the final validator
  */
+function getKiroDataPaths(): string[] {
+  const home = process.env.HOME || '';
+  const platform = process.platform;
+  const paths: string[] = [];
+
+  if (platform === 'darwin') {
+    // macOS: ~/Library/Application Support/kiro-cli/
+    paths.push(path.join(home, 'Library', 'Application Support', 'kiro-cli', 'data.sqlite3'));
+  } else if (platform === 'win32') {
+    // Windows: %APPDATA%/kiro-cli/
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    paths.push(path.join(appData, 'kiro-cli', 'data.sqlite3'));
+  } else {
+    // Linux: ~/.local/share/kiro-cli/ (XDG_DATA_HOME)
+    const xdgData = process.env.XDG_DATA_HOME || path.join(home, '.local', 'share');
+    paths.push(path.join(xdgData, 'kiro-cli', 'data.sqlite3'));
+  }
+
+  // Also check ~/.config/kiro-cli/ and ~/.kiro/ as fallbacks
+  paths.push(
+    path.join(home, '.config', 'kiro-cli', 'data.sqlite3'),
+    path.join(home, '.kiro', 'data.sqlite3'),
+  );
+
+  return paths;
+}
+
 function checkKiroAuth(kiroCliPath: string): { ok: boolean; method: string; detail: string } {
   // Strategy 1: `kiro-cli auth status` (may not exist in all versions)
   try {
@@ -107,22 +139,22 @@ function checkKiroAuth(kiroCliPath: string): { ok: boolean; method: string; deta
     // `auth status` subcommand may not exist — fall through
   }
 
-  // Strategy 2: Check for Kiro token files
-  const kiroDir = path.join(process.env.HOME || '', '.kiro');
-  const tokenCandidates = ['credentials', 'token', 'auth.json', 'session.json'];
-  for (const name of tokenCandidates) {
-    const tokenPath = path.join(kiroDir, name);
+  // Strategy 2: Check for kiro-cli SQLite database (contains auth tokens)
+  // Platform-specific paths:
+  //   macOS:   ~/Library/Application Support/kiro-cli/data.sqlite3
+  //   Linux:   ~/.local/share/kiro-cli/data.sqlite3
+  //   Windows: %APPDATA%/kiro-cli/data.sqlite3
+  for (const dbPath of getKiroDataPaths()) {
     try {
-      const stat = fs.statSync(tokenPath);
+      const stat = fs.statSync(dbPath);
       if (stat.size > 0) {
-        // Token file exists and is non-empty — check if it's not too old (7 days)
         const ageMs = Date.now() - stat.mtimeMs;
         const ageDays = ageMs / (1000 * 60 * 60 * 24);
-        if (ageDays < 7) {
-          return { ok: true, method: 'token file', detail: `${tokenPath} (${Math.floor(ageDays)}d old)` };
-        }
-        // Token might be expired but could still be valid (refresh tokens)
-        return { ok: true, method: 'token file (possibly stale)', detail: `${tokenPath} (${Math.floor(ageDays)}d old)` };
+        return {
+          ok: true,
+          method: 'kiro-cli SQLite database',
+          detail: `${dbPath} (${Math.floor(ageDays)}d old, ${(stat.size / 1024).toFixed(0)}KB)`,
+        };
       }
     } catch { /* not found */ }
   }
@@ -133,7 +165,8 @@ function checkKiroAuth(kiroCliPath: string): { ok: boolean; method: string; deta
     process.env.AWS_SESSION_TOKEN ||
     process.env.AWS_PROFILE
   );
-  const awsCredsFile = path.join(process.env.HOME || '', '.aws', 'credentials');
+  const home = process.env.HOME || '';
+  const awsCredsFile = path.join(home, '.aws', 'credentials');
   const hasAwsCredsFile = (() => {
     try { return fs.statSync(awsCredsFile).size > 0; } catch { return false; }
   })();
@@ -151,7 +184,7 @@ function checkKiroAuth(kiroCliPath: string): { ok: boolean; method: string; deta
   return {
     ok: false,
     method: 'none detected',
-    detail: 'No kiro token files, no AWS credentials. kiro-cli may prompt for login.',
+    detail: 'No kiro-cli database, no AWS credentials. Run: kiro-cli auth login',
   };
 }
 

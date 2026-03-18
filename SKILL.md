@@ -62,11 +62,15 @@ Before running any subcommand other than `setup`, check if `~/.kiro-to-im/config
 Interactive setup wizard. Collect input one field at a time:
 
 **Step 0 — Verify kiro-cli auth**
-- Run `kiro-cli auth status` (or check `~/.kiro/` token files, or AWS creds)
+- Check for kiro-cli SQLite database (platform-specific):
+  - macOS: `~/Library/Application Support/kiro-cli/data.sqlite3`
+  - Linux: `~/.local/share/kiro-cli/data.sqlite3`
+  - Windows: `%APPDATA%/kiro-cli/data.sqlite3`
+- Also try `kiro-cli auth status` and check AWS credentials
 - If not authenticated, ask user which method they want:
   - **Option A: Interactive login** (desktop with browser)
     1. Run `kiro-cli auth login` (opens browser for OAuth)
-    2. Wait for confirmation
+    2. Wait for confirmation — tokens stored in SQLite database
     3. Verify with `kiro-cli auth status`
   - **Option B: AWS IAM credentials** (servers, CI)
     1. Collect AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, optional AWS_REGION

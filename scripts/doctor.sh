@@ -103,12 +103,23 @@ if [ -n "$KIRO_PATH" ] && [ -x "$KIRO_PATH" ]; then
     KIRO_AUTH_METHOD="kiro-cli auth status"
   fi
 
-  # Strategy 2: Token files in ~/.kiro/
+  # Strategy 2: kiro-cli SQLite database (platform-specific paths)
   if [ "$KIRO_AUTH" = "1" ]; then
-    for tokfile in "$HOME/.kiro/credentials" "$HOME/.kiro/token" "$HOME/.kiro/auth.json" "$HOME/.kiro/session.json"; do
-      if [ -f "$tokfile" ] && [ -s "$tokfile" ]; then
+    case "$(uname -s)" in
+      Darwin)
+        KIRO_DB="$HOME/Library/Application Support/kiro-cli/data.sqlite3"
+        ;;
+      MINGW*|MSYS*|CYGWIN*)
+        KIRO_DB="$APPDATA/kiro-cli/data.sqlite3"
+        ;;
+      *)
+        KIRO_DB="${XDG_DATA_HOME:-$HOME/.local/share}/kiro-cli/data.sqlite3"
+        ;;
+    esac
+    for dbpath in "$KIRO_DB" "$HOME/.config/kiro-cli/data.sqlite3" "$HOME/.kiro/data.sqlite3"; do
+      if [ -f "$dbpath" ] && [ -s "$dbpath" ]; then
         KIRO_AUTH=0
-        KIRO_AUTH_METHOD="token file: $tokfile"
+        KIRO_AUTH_METHOD="SQLite database: $dbpath"
         break
       fi
     done
