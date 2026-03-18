@@ -28,7 +28,7 @@ export interface AgentCapabilities {
 }
 
 export interface InitializeResponse {
-  protocolVersion: string;
+  protocolVersion: number | string;
   agentInfo: Implementation;
   agentCapabilities: AgentCapabilities;
 }
@@ -283,9 +283,10 @@ export class AcpClient extends EventEmitter {
     });
 
     // Initialize ACP connection
-    // Method: "initialize", params: { protocolVersion, clientInfo }
+    // Method: "initialize", params: { protocolVersion (number), clientInfo }
+    // kiro-cli v1.27.2 uses protocolVersion: 1 (number), not "2025-01-01" (string)
     const initResult = await this.sendRequest<InitializeResponse>('initialize', {
-      protocolVersion: '2025-01-01',
+      protocolVersion: 1,
       clientInfo: {
         name: 'kiro-to-im',
         version: '0.1.0',
@@ -298,30 +299,33 @@ export class AcpClient extends EventEmitter {
 
   /**
    * Create a new ACP session.
-   * Method: "sessions/new", params: { cwd }
+   * Method: "session/new" (singular!), params: { cwd, mcpServers }
+   * kiro-cli v1.27.2 requires mcpServers field (can be empty array).
    */
   async newSession(cwd: string): Promise<string> {
-    const result = await this.sendRequest<NewSessionResponse>('sessions/new', {
+    const result = await this.sendRequest<NewSessionResponse>('session/new', {
       cwd,
+      mcpServers: [],
     });
     return result.sessionId;
   }
 
   /**
    * Load (resume) an existing ACP session.
-   * Method: "sessions/load", params: { sessionId, cwd }
+   * Method: "session/load" (singular!), params: { sessionId, cwd, mcpServers }
    */
   async loadSession(sessionId: string, cwd: string): Promise<string> {
-    const result = await this.sendRequest<LoadSessionResponse>('sessions/load', {
+    const result = await this.sendRequest<LoadSessionResponse>('session/load', {
       sessionId,
       cwd,
+      mcpServers: [],
     });
     return result.sessionId;
   }
 
   /**
    * Send a prompt and return a stream event receiver.
-   * Method: "sessions/prompt", params: { sessionId, prompt: ContentBlock[] }
+   * Method: "session/prompt" (singular!), params: { sessionId, prompt: ContentBlock[] }
    * The returned async iterable yields StreamEvents until the prompt completes.
    */
   async prompt(sessionId: string, content: ContentBlock[]): Promise<AsyncIterable<StreamEvent>> {
@@ -353,7 +357,7 @@ export class AcpClient extends EventEmitter {
     this.once('prompt_done', onPromptDone);
 
     // Send the prompt request (don't await — we want to start consuming events immediately)
-    const promptPromise = this.sendRequest<PromptResponse>('sessions/prompt', {
+    const promptPromise = this.sendRequest<PromptResponse>('session/prompt', {
       sessionId,
       prompt: content.map(block => {
         switch (block.type) {
@@ -596,7 +600,11 @@ export class AcpClient extends EventEmitter {
         break;
       }
       default:
-        // Unknown notification — ignore
+        // Kiro-specific notifications (_kiro.dev/metadata, _kiro.dev/commands/available, etc.)
+        // are informational — log but don't error
+        if (notification.method?.startsWith('_kiro.dev/')) {
+          // Silently ignore Kiro extension notifications
+        }
         break;
     }
   }
