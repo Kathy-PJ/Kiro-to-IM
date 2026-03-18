@@ -171,9 +171,9 @@ describe('loadConfig/saveConfig round-trip', () => {
   let origHome: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cti-config-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kti-config-test-'));
     origHome = process.env.HOME || '';
-    // We can't easily override CTI_HOME since it's a const,
+    // We can't easily override KTI_HOME since it's a const,
     // so we test the parsing logic indirectly through configToSettings
   });
 

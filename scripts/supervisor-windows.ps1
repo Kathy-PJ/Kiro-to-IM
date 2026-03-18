@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Windows daemon manager for claude-to-im bridge.
+  Windows daemon manager for kiro-to-im bridge.
 
 .DESCRIPTION
   Manages the bridge process on Windows.
@@ -28,21 +28,21 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # ── Paths ──
-$CtiHome    = if ($env:CTI_HOME) { $env:CTI_HOME } else { Join-Path $env:USERPROFILE '.claude-to-im' }
+$KtiHome    = if ($env:KTI_HOME) { $env:KTI_HOME } else { Join-Path $env:USERPROFILE '.kiro-to-im' }
 $SkillDir   = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
-$RuntimeDir = Join-Path $CtiHome 'runtime'
+$RuntimeDir = Join-Path $KtiHome 'runtime'
 $PidFile    = Join-Path $RuntimeDir 'bridge.pid'
 $StatusFile = Join-Path $RuntimeDir 'status.json'
-$LogFile    = Join-Path $CtiHome 'logs' 'bridge.log'
+$LogFile    = Join-Path $KtiHome 'logs' 'bridge.log'
 $DaemonMjs  = Join-Path $SkillDir 'dist' 'daemon.mjs'
 
-$ServiceName = 'ClaudeToIMBridge'
+$ServiceName = 'KiroToIMBridge'
 
 # ── Helpers ──
 
 function Ensure-Dirs {
     @('data','logs','runtime','data/messages') | ForEach-Object {
-        $dir = Join-Path $CtiHome $_
+        $dir = Join-Path $KtiHome $_
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
 }
@@ -135,7 +135,7 @@ function Install-WinSWService {
     $nodePath = Get-NodePath
     $xmlPath = Join-Path $SkillDir "$ServiceName.xml"
 
-    # Run as current user so the service can access ~/.claude-to-im and Codex login state
+    # Run as current user so the service can access ~/.kiro-to-im and Kiro login state
     $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     Write-Host "Service will run as: $currentUser"
     $cred = Get-Credential -UserName $currentUser -Message "Enter password for '$currentUser' (required for Windows Service logon)"
@@ -159,8 +159,8 @@ function Install-WinSWService {
   <env name="APPDATA" value="$env:APPDATA"/>
   <env name="LOCALAPPDATA" value="$env:LOCALAPPDATA"/>
   <env name="PATH" value="$env:PATH"/>
-  <env name="CTI_HOME" value="$CtiHome"/>
-  <logpath>$(Join-Path $CtiHome 'logs')</logpath>
+  <env name="KTI_HOME" value="$KtiHome"/>
+  <logpath>$(Join-Path $KtiHome 'logs')</logpath>
   <log mode="append">
     <logfile>bridge-service.log</logfile>
   </log>
@@ -185,7 +185,7 @@ function Install-NSSMService {
     param([string]$NSSMPath)
     $nodePath = Get-NodePath
 
-    # Run as current user so the service can access ~/.claude-to-im and Codex login state
+    # Run as current user so the service can access ~/.kiro-to-im and Kiro login state
     $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     Write-Host "Service will run as: $currentUser"
     $cred = Get-Credential -UserName $currentUser -Message "Enter password for '$currentUser' (required for Windows Service logon)"
@@ -200,7 +200,7 @@ function Install-NSSMService {
     & $NSSMPath set $ServiceName AppStderrCreationDisposition 4
     & $NSSMPath set $ServiceName Description "Claude-to-IM bridge daemon"
     & $NSSMPath set $ServiceName AppRestartDelay 10000
-    & $NSSMPath set $ServiceName AppEnvironmentExtra "USERPROFILE=$env:USERPROFILE" "APPDATA=$env:APPDATA" "LOCALAPPDATA=$env:LOCALAPPDATA" "CTI_HOME=$CtiHome"
+    & $NSSMPath set $ServiceName AppEnvironmentExtra "USERPROFILE=$env:USERPROFILE" "APPDATA=$env:APPDATA" "LOCALAPPDATA=$env:LOCALAPPDATA" "KTI_HOME=$KtiHome"
 
     Write-Host "Service '$ServiceName' installed via NSSM."
     Write-Host "  Service account: $currentUser"

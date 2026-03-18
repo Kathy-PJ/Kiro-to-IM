@@ -35,7 +35,7 @@ Validating tokens...
   Telegram: OK (bot @MyBotName)
   Discord: OK (format valid)
 
-Config written to ~/.claude-to-im/config.env
+Config written to ~/.kiro-to-im/config.env
 ```
 
 ## start
@@ -46,7 +46,7 @@ Starts the bridge daemon in the background.
 /claude-to-im start
 ```
 
-The daemon process ID is stored in `~/.claude-to-im/runtime/bridge.pid`. If the daemon is already running, the command reports the existing process.
+The daemon process ID is stored in `~/.kiro-to-im/runtime/bridge.pid`. If the daemon is already running, the command reports the existing process.
 
 If startup fails, run `/claude-to-im doctor` to diagnose issues.
 
@@ -83,7 +83,7 @@ Shows recent log output from the daemon.
 /claude-to-im logs 200    # Last 200 lines
 ```
 
-Logs are stored in `~/.claude-to-im/logs/` and are automatically redacted to mask secrets.
+Logs are stored in `~/.kiro-to-im/logs/` and are automatically redacted to mask secrets.
 
 ## reconfigure
 
@@ -125,6 +125,6 @@ QQ currently supports **C2C private chat only**:
 - No streaming preview
 - Image inbound only (no image replies)
 - No group/channel support yet
-- Required config: `CTI_QQ_APP_ID`, `CTI_QQ_APP_SECRET` (obtain from https://q.qq.com/qqbot/openclaw)
-- `CTI_QQ_ALLOWED_USERS` takes `user_openid` values, not QQ numbers
-- Set `CTI_QQ_IMAGE_ENABLED=false` if the provider doesn't support image input
+- Required config: `KTI_QQ_APP_ID`, `KTI_QQ_APP_SECRET` (obtain from https://q.qq.com/qqbot/openclaw)
+- `KTI_QQ_ALLOWED_USERS` takes `user_openid` values, not QQ numbers
+- Set `KTI_QQ_IMAGE_ENABLED=false` if the provider doesn't support image input

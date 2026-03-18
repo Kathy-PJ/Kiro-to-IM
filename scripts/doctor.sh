@@ -35,232 +35,59 @@ fi
 # --- Helper: read a value from config.env ---
 get_config() { grep "^$1=" "$CONFIG_FILE" 2>/dev/null | head -1 | cut -d= -f2- | sed 's/^["'"'"']//;s/["'"'"']$//'; }
 
-# --- Read runtime setting ---
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-CTI_RUNTIME=$(get_config CTI_RUNTIME)
-CTI_RUNTIME="${CTI_RUNTIME:-claude}"
-echo "Runtime: $CTI_RUNTIME"
 echo ""
 
-# --- Claude CLI available (claude/auto modes) ---
-if [ "$CTI_RUNTIME" = "claude" ] || [ "$CTI_RUNTIME" = "auto" ]; then
-  # Resolve CLI path matching the daemon's checkCliCompatibility logic:
-  #   - Version >= 2.x AND all required flags present
-  #   - Skip candidates that fail either check (same as resolveClaudeCliPath)
-  CLAUDE_PATH=""
-  CLAUDE_VER=""
-  CLAUDE_COMPAT=1
-  REQUIRED_FLAGS="output-format input-format permission-mode setting-sources"
+# --- kiro-cli available ---
+KIRO_PATH=""
+KIRO_VER=""
 
-  # Helper: check if a candidate passes both version and flags checks.
-  # Sets CLAUDE_PATH/CLAUDE_VER/CLAUDE_COMPAT on success.
-  try_candidate() {
-    local cand="$1"
-    [ -x "$cand" ] || return 1
-    local ver
-    ver=$("$cand" --version 2>/dev/null || true)
-    [ -z "$ver" ] && return 1
-    local major
-    major=$(echo "$ver" | sed -E -n 's/^[^0-9]*([0-9]+)\..*/\1/p' | head -1)
-    if [ -z "$major" ] || ! [ "$major" -ge 2 ] 2>/dev/null; then
-      echo "  (skipping $cand — version $ver is too old, need >= 2.x)"
-      return 1
-    fi
-    # Version OK — check flags
-    local help_text
-    help_text=$("$cand" --help 2>&1 || true)
-    for flag in $REQUIRED_FLAGS; do
-      if ! echo "$help_text" | grep -q "$flag"; then
-        echo "  (skipping $cand — version $ver OK but missing --$flag)"
-        return 1
-      fi
-    done
-    # Fully compatible
-    CLAUDE_PATH="$cand"
-    CLAUDE_VER="$ver"
-    CLAUDE_COMPAT=0
-    return 0
-  }
-
-  # 1. Explicit env var — if set, daemon uses it unconditionally (no fallback).
-  #    Doctor must mirror this: report on this path only, never scan further.
-  CTI_EXE=$(get_config CTI_CLAUDE_CODE_EXECUTABLE 2>/dev/null || true)
-  if [ -n "$CTI_EXE" ]; then
-    if [ -x "$CTI_EXE" ]; then
-      if ! try_candidate "$CTI_EXE"; then
-        # Explicit path is set but incompatible — daemon WILL use it and fail.
-        # Report it as the selected CLI so the user sees the real problem.
-        CLAUDE_PATH="$CTI_EXE"
-        CLAUDE_VER=$("$CTI_EXE" --version 2>/dev/null || echo "unknown")
-        # CLAUDE_COMPAT stays 1 (incompatible) — checks below will report failure
-      fi
-    else
-      CLAUDE_PATH="$CTI_EXE"
-      CLAUDE_VER="(not executable)"
-    fi
-  fi
-
-  # 2. All PATH candidates (only if no explicit env var was set)
-  if [ -z "$CTI_EXE" ] && [ -z "$CLAUDE_PATH" ]; then
-    ALL_CLAUDES=$(which -a claude 2>/dev/null || true)
-    for cand in $ALL_CLAUDES; do
-      try_candidate "$cand" && break
-    done
-  fi
-
-  # 3. Well-known locations (only if no explicit env var was set)
-  if [ -z "$CTI_EXE" ] && [ -z "$CLAUDE_PATH" ]; then
-    for cand in \
-      "$HOME/.claude/local/claude" \
-      "$HOME/.local/bin/claude" \
-      "/usr/local/bin/claude" \
-      "/opt/homebrew/bin/claude" \
-      "$HOME/.npm-global/bin/claude"; do
-      try_candidate "$cand" && break
-    done
-  fi
-
-  if [ -n "$CLAUDE_PATH" ] && [ "$CLAUDE_COMPAT" = "0" ]; then
-    check "Claude CLI compatible (${CLAUDE_VER} at ${CLAUDE_PATH})" 0
-  elif [ -n "$CLAUDE_PATH" ]; then
-    # Path found but incompatible (too old, missing flags, or not executable)
-    check "Claude CLI compatible (${CLAUDE_VER} at ${CLAUDE_PATH} — incompatible, see above)" 1
+# 1. Explicit env var / config
+KTI_CLI_PATH=$(get_config KTI_KIRO_CLI_PATH 2>/dev/null || true)
+if [ -n "$KTI_CLI_PATH" ]; then
+  if [ -x "$KTI_CLI_PATH" ]; then
+    KIRO_PATH="$KTI_CLI_PATH"
+    KIRO_VER=$("$KTI_CLI_PATH" --version 2>/dev/null || echo "unknown")
   else
-    if [ "$CTI_RUNTIME" = "claude" ]; then
-      check "Claude CLI available (not found in PATH or common locations)" 1
-    else
-      check "Claude CLI available (not found — will use Codex fallback)" 0
-    fi
-  fi
-
-  # --- Claude CLI authenticated ---
-  # Skip this check if third-party API credentials are configured in config.env.
-  # In that mode the bridge authenticates via ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN,
-  # not via `claude auth login`, so a missing interactive login is expected and harmless.
-  HAS_THIRD_PARTY_AUTH=false
-  if [ -f "$CONFIG_FILE" ] && grep -qE "^ANTHROPIC_(API_KEY|AUTH_TOKEN)=" "$CONFIG_FILE" 2>/dev/null; then
-    HAS_THIRD_PARTY_AUTH=true
-  fi
-  if [ -n "$CLAUDE_PATH" ] && [ "$CLAUDE_COMPAT" = "0" ]; then
-    if [ "$HAS_THIRD_PARTY_AUTH" = "true" ]; then
-      check "Claude CLI auth (skipped — using third-party API credentials from config.env)" 0
-    else
-      AUTH_OUT=$("$CLAUDE_PATH" auth status 2>&1 || true)
-      if echo "$AUTH_OUT" | grep -qiE 'loggedIn.*true|logged.in'; then
-        check "Claude CLI authenticated" 0
-      else
-        check "Claude CLI authenticated (run 'claude auth login')" 1
-      fi
-    fi
-  fi
-
-  # --- ANTHROPIC_* env reachability ---
-  # Check whether ANTHROPIC_* vars are configured in config.env.
-  # This is what matters for the daemon — the current shell env is irrelevant
-  # because on macOS the daemon runs under launchd with only plist env vars.
-  HAS_ANTHROPIC_CONFIG=false
-  if [ -f "$CONFIG_FILE" ]; then
-    if grep -q "^ANTHROPIC_" "$CONFIG_FILE" 2>/dev/null; then
-      HAS_ANTHROPIC_CONFIG=true
-    fi
-  fi
-  if [ "$HAS_ANTHROPIC_CONFIG" = "true" ]; then
-    check "ANTHROPIC_* vars in config.env (third-party API provider)" 0
-
-    PLIST_FILE="$HOME/Library/LaunchAgents/com.claude-to-im.bridge.plist"
-
-    # On macOS, verify the launchd plist also has the vars
-    if [ "$(uname -s)" = "Darwin" ] && [ -f "$PLIST_FILE" ]; then
-      if grep -q "ANTHROPIC_" "$PLIST_FILE" 2>/dev/null; then
-        check "ANTHROPIC_* vars in launchd plist" 0
-      else
-        check "ANTHROPIC_* vars in launchd plist (NOT present — restart bridge to regenerate plist)" 1
-      fi
-    fi
-
-    # If bridge is running, verify the LIVE process has the vars.
-    # The plist may be correct on disk but if the daemon hasn't been
-    # restarted since the plist was regenerated, it still runs with the
-    # old environment.
-    BRIDGE_PID=$(cat "$PID_FILE" 2>/dev/null || true)
-    if [ -n "$BRIDGE_PID" ] && kill -0 "$BRIDGE_PID" 2>/dev/null; then
-      # ps eww shows the process environment on macOS/Linux
-      PROC_ENV=$(ps eww -p "$BRIDGE_PID" 2>/dev/null || true)
-      if echo "$PROC_ENV" | grep -q "ANTHROPIC_"; then
-        check "Running bridge process has ANTHROPIC_* env vars" 0
-      else
-        check "Running bridge process has ANTHROPIC_* env vars (NOT in process env — restart the bridge)" 1
-      fi
-    fi
-  else
-    check "ANTHROPIC_* vars in config.env (not set — OK if using default Anthropic auth)" 0
-  fi
-
-  # --- SDK cli.js resolvable ---
-  SDK_CLI=""
-  for candidate in \
-    "$SKILL_DIR/node_modules/@anthropic-ai/claude-agent-sdk/cli.js" \
-    "$SKILL_DIR/node_modules/@anthropic-ai/claude-agent-sdk/dist/cli.js"; do
-    if [ -f "$candidate" ]; then
-      SDK_CLI="$candidate"
-      break
-    fi
-  done
-  if [ -n "$SDK_CLI" ]; then
-    check "Claude SDK cli.js exists ($SDK_CLI)" 0
-  else
-    if [ "$CTI_RUNTIME" = "claude" ]; then
-      check "Claude SDK cli.js exists (not found — run 'npm install' in $SKILL_DIR)" 1
-    else
-      check "Claude SDK cli.js exists (not found — OK for auto/codex mode)" 0
-    fi
+    KIRO_PATH="$KTI_CLI_PATH"
+    KIRO_VER="(not executable)"
   fi
 fi
 
-# --- Codex checks (codex/auto modes) ---
-if [ "$CTI_RUNTIME" = "codex" ] || [ "$CTI_RUNTIME" = "auto" ]; then
-  if command -v codex &>/dev/null; then
-    CODEX_VER=$(codex --version 2>/dev/null || echo "unknown")
-    check "Codex CLI available (${CODEX_VER})" 0
-  else
-    if [ "$CTI_RUNTIME" = "codex" ]; then
-      check "Codex CLI available (not found in PATH)" 1
-    else
-      check "Codex CLI available (not found — will use Claude)" 0
-    fi
-  fi
+# 2. Search PATH
+if [ -z "$KIRO_PATH" ] && command -v kiro-cli &>/dev/null; then
+  KIRO_PATH=$(command -v kiro-cli)
+  KIRO_VER=$("$KIRO_PATH" --version 2>/dev/null || echo "unknown")
+fi
 
-  # Check @openai/codex-sdk
-  CODEX_SDK="$SKILL_DIR/node_modules/@openai/codex-sdk"
-  if [ -d "$CODEX_SDK" ]; then
-    check "@openai/codex-sdk installed" 0
-  else
-    if [ "$CTI_RUNTIME" = "codex" ]; then
-      check "@openai/codex-sdk installed (not found — run 'npm install' in $SKILL_DIR)" 1
-    else
-      check "@openai/codex-sdk installed (not found — OK for auto/claude mode)" 0
+# 3. Common locations
+if [ -z "$KIRO_PATH" ]; then
+  for cand in \
+    "$HOME/.local/bin/kiro-cli" \
+    "/usr/local/bin/kiro-cli" \
+    "/opt/homebrew/bin/kiro-cli" \
+    "$HOME/.npm-global/bin/kiro-cli"; do
+    if [ -x "$cand" ]; then
+      KIRO_PATH="$cand"
+      KIRO_VER=$("$cand" --version 2>/dev/null || echo "unknown")
+      break
     fi
-  fi
+  done
+fi
 
-  # Check Codex auth: any of CTI_CODEX_API_KEY / CODEX_API_KEY / OPENAI_API_KEY,
-  # or `codex auth status` showing logged-in (interactive login).
-  CODEX_AUTH=1
-  if [ -n "${CTI_CODEX_API_KEY:-}" ] || [ -n "${CODEX_API_KEY:-}" ] || [ -n "${OPENAI_API_KEY:-}" ]; then
-    CODEX_AUTH=0
-  elif command -v codex &>/dev/null; then
-    CODEX_AUTH_OUT=$(codex auth status 2>&1 || true)
-    if echo "$CODEX_AUTH_OUT" | grep -qiE 'logged.in|authenticated'; then
-      CODEX_AUTH=0
-    fi
-  fi
-  if [ "$CODEX_AUTH" = "0" ]; then
-    check "Codex auth available (API key or login)" 0
+if [ -n "$KIRO_PATH" ] && [ -x "$KIRO_PATH" ]; then
+  check "kiro-cli available (${KIRO_VER} at ${KIRO_PATH})" 0
+else
+  check "kiro-cli available (not found — install from https://kiro.dev/)" 1
+fi
+
+# --- kiro-cli ACP mode ---
+if [ -n "$KIRO_PATH" ] && [ -x "$KIRO_PATH" ]; then
+  HELP_TEXT=$("$KIRO_PATH" --help 2>&1 || true)
+  if echo "$HELP_TEXT" | grep -qi "acp"; then
+    check "kiro-cli supports ACP mode" 0
   else
-    if [ "$CTI_RUNTIME" = "codex" ]; then
-      check "Codex auth available (set OPENAI_API_KEY or run 'codex auth login')" 1
-    else
-      check "Codex auth available (not found — needed only for Codex fallback)" 0
-    fi
+    check "kiro-cli supports ACP mode (not found in --help output)" 1
   fi
 fi
 
@@ -296,11 +123,11 @@ fi
 
 # --- Load config for channel checks ---
 if [ -f "$CONFIG_FILE" ]; then
-  CTI_CHANNELS=$(get_config CTI_ENABLED_CHANNELS)
+  KTI_CHANNELS=$(get_config KTI_ENABLED_CHANNELS)
 
   # --- Telegram ---
-  if echo "$CTI_CHANNELS" | grep -q telegram; then
-    TG_TOKEN=$(get_config CTI_TG_BOT_TOKEN)
+  if echo "$KTI_CHANNELS" | grep -q telegram; then
+    TG_TOKEN=$(get_config KTI_TG_BOT_TOKEN)
     if [ -n "$TG_TOKEN" ]; then
       TG_RESULT=$(curl -s --max-time 5 "https://api.telegram.org/bot${TG_TOKEN}/getMe" 2>/dev/null || echo '{"ok":false}')
       if echo "$TG_RESULT" | grep -q '"ok":true'; then
@@ -314,10 +141,10 @@ if [ -f "$CONFIG_FILE" ]; then
   fi
 
   # --- Feishu ---
-  if echo "$CTI_CHANNELS" | grep -q feishu; then
-    FS_APP_ID=$(get_config CTI_FEISHU_APP_ID)
-    FS_SECRET=$(get_config CTI_FEISHU_APP_SECRET)
-    FS_DOMAIN=$(get_config CTI_FEISHU_DOMAIN)
+  if echo "$KTI_CHANNELS" | grep -q feishu; then
+    FS_APP_ID=$(get_config KTI_FEISHU_APP_ID)
+    FS_SECRET=$(get_config KTI_FEISHU_APP_SECRET)
+    FS_DOMAIN=$(get_config KTI_FEISHU_DOMAIN)
     FS_DOMAIN="${FS_DOMAIN:-https://open.feishu.cn}"
     if [ -n "$FS_APP_ID" ] && [ -n "$FS_SECRET" ]; then
       FEISHU_RESULT=$(curl -s --max-time 5 -X POST "${FS_DOMAIN}/open-apis/auth/v3/tenant_access_token/internal" \
@@ -334,9 +161,9 @@ if [ -f "$CONFIG_FILE" ]; then
   fi
 
   # --- QQ ---
-  if echo "$CTI_CHANNELS" | grep -q qq; then
-    QQ_APP_ID=$(get_config CTI_QQ_APP_ID)
-    QQ_APP_SECRET=$(get_config CTI_QQ_APP_SECRET)
+  if echo "$KTI_CHANNELS" | grep -q qq; then
+    QQ_APP_ID=$(get_config KTI_QQ_APP_ID)
+    QQ_APP_SECRET=$(get_config KTI_QQ_APP_SECRET)
     if [ -n "$QQ_APP_ID" ] && [ -n "$QQ_APP_SECRET" ]; then
       QQ_TOKEN_RESULT=$(curl -s --max-time 10 -X POST "https://bots.qq.com/app/getAppAccessToken" \
         -H "Content-Type: application/json" \
@@ -344,7 +171,6 @@ if [ -f "$CONFIG_FILE" ]; then
       QQ_ACCESS_TOKEN=$(echo "$QQ_TOKEN_RESULT" | sed -n 's/.*"access_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
       if [ -n "$QQ_ACCESS_TOKEN" ]; then
         check "QQ app credentials are valid (access_token obtained)" 0
-        # Verify gateway availability
         QQ_GW_RESULT=$(curl -s --max-time 10 "https://api.sgroup.qq.com/gateway" \
           -H "Authorization: QQBot ${QQ_ACCESS_TOKEN}" 2>/dev/null || echo '{}')
         if echo "$QQ_GW_RESULT" | grep -q '"url"'; then
@@ -361,8 +187,8 @@ if [ -f "$CONFIG_FILE" ]; then
   fi
 
   # --- Discord ---
-  if echo "$CTI_CHANNELS" | grep -q discord; then
-    DC_TOKEN=$(get_config CTI_DISCORD_BOT_TOKEN)
+  if echo "$KTI_CHANNELS" | grep -q discord; then
+    DC_TOKEN=$(get_config KTI_DISCORD_BOT_TOKEN)
     if [ -n "$DC_TOKEN" ]; then
       if echo "${DC_TOKEN}" | grep -qE '^[A-Za-z0-9_-]{20,}\.'; then
         check "Discord bot token format" 0
@@ -413,10 +239,10 @@ echo "Results: $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then
   echo ""
   echo "Common fixes:"
-  echo "  SDK cli.js missing    → cd $SKILL_DIR && npm install"
-  echo "  dist/daemon.mjs stale → cd $SKILL_DIR && npm run build"
-  echo "  config.env missing    → run setup wizard"
-  echo "  Stale PID file        → run stop, then start"
+  echo "  kiro-cli missing      -> install from https://kiro.dev/"
+  echo "  dist/daemon.mjs stale -> cd $SKILL_DIR && npm run build"
+  echo "  config.env missing    -> run setup wizard"
+  echo "  Stale PID file        -> run stop, then start"
 fi
 
 [ "$FAIL" -eq 0 ] && exit 0 || exit 1

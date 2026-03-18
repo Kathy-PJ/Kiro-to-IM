@@ -38,32 +38,18 @@ ensure_built() {
 }
 
 # Clean environment for subprocess isolation.
+# Kiro uses ACP protocol — we only need to ensure no conflicting env vars leak.
 clean_env() {
   unset CLAUDECODE 2>/dev/null || true
 
-  local runtime
-  runtime=$(grep "^CTI_RUNTIME=" "$KTI_HOME/config.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "'" | tr -d '"' || true)
-  runtime="${runtime:-claude}"
-
-  local mode="${CTI_ENV_ISOLATION:-inherit}"
+  local mode="${KTI_ENV_ISOLATION:-inherit}"
   if [ "$mode" = "strict" ]; then
-    case "$runtime" in
-      codex)
-        while IFS='=' read -r name _; do
-          case "$name" in ANTHROPIC_*) unset "$name" 2>/dev/null || true ;; esac
-        done < <(env)
-        ;;
-      claude)
-        # Keep ANTHROPIC_* (from config.env) — needed for third-party API providers.
-        # Strip OPENAI_* to avoid cross-runtime leakage.
-        while IFS='=' read -r name _; do
-          case "$name" in OPENAI_*) unset "$name" 2>/dev/null || true ;; esac
-        done < <(env)
-        ;;
-      auto)
-        # Keep both ANTHROPIC_* and OPENAI_* for auto mode
-        ;;
-    esac
+    # Strip potentially conflicting env vars from other AI tools
+    while IFS='=' read -r name _; do
+      case "$name" in
+        ANTHROPIC_*|OPENAI_*) unset "$name" 2>/dev/null || true ;;
+      esac
+    done < <(env)
   fi
 }
 
@@ -133,8 +119,8 @@ case "${1:-help}" in
       exit 1
     fi
 
-    # Source config.env BEFORE clean_env so that CTI_ANTHROPIC_PASSTHROUGH
-    # and other CTI_* flags are available when clean_env checks them.
+    # Source config.env BEFORE clean_env so that KTI_*
+    # flags are available when clean_env checks them.
     [ -f "$KTI_HOME/config.env" ] && set -a && source "$KTI_HOME/config.env" && set +a
 
     clean_env

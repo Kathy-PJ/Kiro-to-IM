@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { JsonFileStore } from '../store.js';
-import { CTI_HOME } from '../config.js';
+import { KTI_HOME } from '../config.js';
 
-const DATA_DIR = path.join(CTI_HOME, 'data');
+const DATA_DIR = path.join(KTI_HOME, 'data');
 
 // We construct the store with a settings map directly
 function makeSettings(): Map<string, string> {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Linux supervisor — setsid/nohup fallback process management.
-# Sourced by daemon.sh; expects CTI_HOME, SKILL_DIR, PID_FILE, STATUS_FILE, LOG_FILE.
+# Sourced by daemon.sh; expects KTI_HOME, SKILL_DIR, PID_FILE, STATUS_FILE, LOG_FILE.
 
 # ── Public interface (called by daemon.sh) ──
 
