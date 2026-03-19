@@ -173,7 +173,7 @@ export class AcpClient extends EventEmitter {
               params.options?.[0];
             return {
               outcome: {
-                type: 'selected' as const,
+                outcome: 'selected' as const,
                 optionId: option?.optionId ?? '',
               },
             };
@@ -349,7 +349,7 @@ export class AcpClient extends EventEmitter {
    */
   resolvePermission(permId: string, optionId: string): void {
     this.emit(`permission_resolved_${permId}`, {
-      outcome: { type: 'selected', optionId },
+      outcome: { outcome: 'selected', optionId },
     });
   }
 }
