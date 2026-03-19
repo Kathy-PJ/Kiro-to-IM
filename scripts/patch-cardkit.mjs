@@ -35,6 +35,7 @@ const nativeStreamingModule = `
 
 const _STREAM_UPDATE_INTERVAL = 300; // ms
 const _nativeCards = new Map(); // chatId → { messageId, token, apiBase, text, timer, inflightDone }
+const _cardCreating = new Set(); // chatId set — prevents duplicate card creation
 
 async function _getNativeToken(restClient) {
   try {
@@ -100,20 +101,23 @@ for (const filePath of adapterFiles) {
     const _chatId = arguments[0], _fullText = arguments[1];
     const _existing = _nativeCards.get(_chatId);
     if (!_existing) {
-      // First text chunk — create card
+      // First text chunk — create card (with creation lock to prevent duplicates)
+      if (_cardCreating.has(_chatId)) return; // Already creating
       const _replyTo = this.lastIncomingMessageId?.get(_chatId);
       if (_replyTo && this.restClient) {
+        _cardCreating.add(_chatId);
         (async () => {
           const _tk = await _getNativeToken(this.restClient);
-          if (!_tk) return;
+          if (!_tk) { _cardCreating.delete(_chatId); return; }
           const _domain = this.restClient?.domain || 'https://open.feishu.cn';
           const _ab = _domain.includes('/open-apis') ? _domain : _domain + '/open-apis';
           const _mid = await _nativeReplyCard(_tk, _ab, _replyTo, _fullText.trim() || '...');
+          _cardCreating.delete(_chatId);
           if (_mid) {
             _nativeCards.set(_chatId, { messageId: _mid, token: _tk, apiBase: _ab, text: _fullText, timer: null, inflightDone: true });
             console.log('[feishu-streaming] Card created:', _mid);
           }
-        })().catch(() => {});
+        })().catch(() => { _cardCreating.delete(_chatId); });
       }
       return;
     }
