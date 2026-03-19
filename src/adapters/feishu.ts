@@ -466,7 +466,7 @@ export class FeishuAdapter extends BaseAdapter {
           rootId: msg.root_id || undefined,
         };
 
-        // Parse image/file attachments
+        // Parse image/file/audio/video attachments
         if (msg.message_type === 'image') {
           try {
             const parsed = JSON.parse(msg.content);
@@ -481,6 +481,38 @@ export class FeishuAdapter extends BaseAdapter {
               inbound.files = [{
                 key: parsed.file_key,
                 name: parsed.file_name || 'file',
+                messageId: msg.message_id,
+              }];
+            }
+          } catch { /* ignore */ }
+        } else if (msg.message_type === 'audio') {
+          try {
+            const parsed = JSON.parse(msg.content);
+            if (parsed.file_key) {
+              inbound.files = [{
+                key: parsed.file_key,
+                name: 'audio.opus',
+                messageId: msg.message_id,
+              }];
+            }
+          } catch { /* ignore */ }
+        } else if (msg.message_type === 'media') {
+          try {
+            const parsed = JSON.parse(msg.content);
+            if (parsed.file_key) {
+              inbound.files = [{
+                key: parsed.file_key,
+                name: parsed.file_name || 'video.mp4',
+                messageId: msg.message_id,
+              }];
+            }
+          } catch { /* ignore */ }
+        } else if (msg.message_type === 'sticker') {
+          try {
+            const parsed = JSON.parse(msg.content);
+            if (parsed.file_key) {
+              inbound.images = [{
+                key: parsed.file_key,
                 messageId: msg.message_id,
               }];
             }
@@ -523,6 +555,31 @@ export class FeishuAdapter extends BaseAdapter {
         return content.trim() || null;
       }
     }
+    if (msgType === 'post') {
+      // Rich text: extract all text nodes from post content
+      try {
+        const parsed = JSON.parse(content);
+        const texts: string[] = [];
+        // post content: { "zh_cn": { "title": "...", "content": [[{tag, text}, ...]] } }
+        for (const lang of Object.values(parsed) as any[]) {
+          if (lang?.title) texts.push(lang.title);
+          if (Array.isArray(lang?.content)) {
+            for (const line of lang.content) {
+              if (Array.isArray(line)) {
+                for (const node of line) {
+                  if (node.tag === 'text' && node.text) texts.push(node.text);
+                  else if (node.tag === 'a' && node.text) texts.push(`${node.text}(${node.href || ''})`);
+                }
+              }
+            }
+          }
+        }
+        const result = texts.join(' ').trim();
+        return result || null;
+      } catch {
+        return '[rich text]';
+      }
+    }
     if (msgType === 'image') return '[image]';
     if (msgType === 'file') {
       try {
@@ -532,7 +589,29 @@ export class FeishuAdapter extends BaseAdapter {
         return '[file]';
       }
     }
-    return null;
+    if (msgType === 'audio') {
+      try {
+        const parsed = JSON.parse(content);
+        const dur = parsed.duration ? ` ${Math.round(parsed.duration / 1000)}s` : '';
+        return `[audio${dur}]`;
+      } catch {
+        return '[audio]';
+      }
+    }
+    if (msgType === 'media') {
+      try {
+        const parsed = JSON.parse(content);
+        const name = parsed.file_name ? `: ${parsed.file_name}` : '';
+        return `[video${name}]`;
+      } catch {
+        return '[video]';
+      }
+    }
+    if (msgType === 'sticker') {
+      return '[sticker]';
+    }
+    // Other types: return a placeholder instead of null (don't silently drop)
+    return `[${msgType}]`;
   }
 
   // ── REST API: Token ──

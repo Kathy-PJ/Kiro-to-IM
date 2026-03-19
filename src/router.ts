@@ -13,11 +13,25 @@ import type { BaseAdapter, InboundMessage, ReplyHandle } from './adapters/base.j
 import { AcpClient, textBlock, imageBlock, resourceLinkBlock } from './acp-client.js';
 import type { ContentBlock, StreamEvent, AcpClientOptions } from './acp-client.js';
 import { SessionMap } from './session-map.js';
+import { ResourceStore } from './resource-store.js';
 
 // Card update interval (matches acp-link CARD_UPDATE_INTERVAL = 300ms)
 const CARD_UPDATE_INTERVAL = 300;
 // Keepalive interval (6 hours, matches acp-link)
 const KEEPALIVE_INTERVAL = 6 * 60 * 60 * 1000;
+// Permission reply timeout (5 minutes)
+const PERMISSION_TIMEOUT = 5 * 60 * 1000;
+
+// ── Pending Permission ──
+
+interface PendingPermission {
+  permId: string;
+  client: AcpClient;
+  options: Array<{ optionId: string; name: string; kind: string }>;
+  toolName: string;
+  resolve: () => void;
+  timer: NodeJS.Timeout;
+}
 
 // ── FNV-1a stable hash (matches acp-link) ──
 
@@ -71,10 +85,19 @@ export class MessageRouter {
   private cleanupTimer: NodeJS.Timeout | null = null;
   // Track inflight messages per adapter (for graceful shutdown)
   private inflight = new Set<Promise<void>>();
+  // chatId → pending permission (interactive approval mode)
+  private pendingPermissions = new Map<string, PendingPermission>();
+  // Dedicated keepalive worker (separate kiro-cli process, like acp-link)
+  private keepaliveClient: AcpClient | null = null;
+  // Restart lock per worker index (double-check pattern)
+  private restartingWorker = new Set<number>();
+  // Resource store (SHA256 dedup, like acp-link)
+  private resourceStore: ResourceStore;
 
   constructor(config: RouterConfig) {
     this.config = config;
     this.sessionMap = new SessionMap();
+    this.resourceStore = new ResourceStore();
   }
 
   /**
@@ -94,7 +117,11 @@ export class MessageRouter {
     // Start keepalive and cleanup timers
     this.keepaliveTimer = setInterval(() => this.keepalive(), KEEPALIVE_INTERVAL);
     this.cleanupTimer = setInterval(
-      () => this.sessionMap.cleanupExpired(this.config.sessionRetention),
+      () => {
+        this.sessionMap.cleanupExpired(this.config.sessionRetention);
+        this.resourceStore.cleanupExpired(this.config.sessionRetention);
+        this.cleanupOldLogs();
+      },
       60 * 60 * 1000, // hourly
     );
   }
@@ -151,7 +178,23 @@ export class MessageRouter {
     let worker = this.workers[idx];
 
     if (!worker?.alive || !worker.client.isAlive) {
+      // Double-check lock: another task may have already restarted this worker
+      if (this.restartingWorker.has(idx)) {
+        // Wait briefly for the in-progress restart to complete
+        await new Promise(r => setTimeout(r, 500));
+        worker = this.workers[idx];
+        if (worker?.alive && worker.client.isAlive) {
+          return { client: worker.client, idx };
+        }
+      }
+
       try {
+        this.restartingWorker.add(idx);
+        // Double-check: maybe another concurrent caller already restarted
+        worker = this.workers[idx];
+        if (worker?.alive && worker.client.isAlive) {
+          return { client: worker.client, idx };
+        }
         await this.restartWorker(idx);
         worker = this.workers[idx];
       } catch {
@@ -164,6 +207,8 @@ export class MessageRouter {
           }
         }
         if (!worker?.alive) throw new Error('All kiro-cli workers are down');
+      } finally {
+        this.restartingWorker.delete(idx);
       }
     }
 
@@ -217,6 +262,12 @@ export class MessageRouter {
       `[router] [${msg.adapter}] message: chat=${msg.chatId}, user=${msg.userId}, ` +
       `text="${msg.text.substring(0, 50)}${msg.text.length > 50 ? '...' : ''}"`,
     );
+
+    // ── Check if this is a permission reply (user sent "1", "2", "3") ──
+    const permChatKey = msg.rootId || msg.chatId;
+    if (this.tryResolvePermission(permChatKey, adapter, msg)) {
+      return;
+    }
 
     // Determine routing key for session lookup
     // Feishu: use root_id (thread root) or message_id (new thread)
@@ -348,10 +399,13 @@ export class MessageRouter {
         const { texts, images, files } = await adapter.aggregateThread(routingKey, msg.chatId);
         for (const text of texts) blocks.push(textBlock(text));
 
-        // Download and add images
+        // Download and add images (save to ResourceStore with SHA256 dedup)
         for (const img of images) {
           try {
-            const data = await adapter.downloadResource(img.messageId, img.key, 'image');
+            const localPath = await this.resourceStore.downloadAndSave(
+              adapter, img.messageId, img.key, 'image', `${img.key}.png`,
+            );
+            const data = (await import('node:fs')).readFileSync(localPath);
             const mime = detectImageMime(data);
             blocks.push(imageBlock(data.toString('base64'), mime));
           } catch (err) {
@@ -359,9 +413,17 @@ export class MessageRouter {
           }
         }
 
-        // Add file references
+        // Download and add files (save to ResourceStore, pass as resource_link with file:// URI)
         for (const file of files) {
-          blocks.push(resourceLinkBlock(file.name, `feishu://file/${file.key}`));
+          try {
+            const localPath = await this.resourceStore.downloadAndSave(
+              adapter, file.messageId, file.key, 'file', file.name,
+            );
+            blocks.push(resourceLinkBlock(file.name, ResourceStore.toFileUri(localPath)));
+          } catch (err) {
+            console.warn(`[router] Failed to download file ${file.key}: ${err}`);
+            blocks.push(resourceLinkBlock(file.name, `feishu://file/${file.key}`));
+          }
         }
       } catch (err) {
         console.warn(`[router] Thread aggregation failed: ${err}`);
@@ -404,101 +466,305 @@ export class MessageRouter {
     );
 
     const { client } = await this.getWorker(routingKey);
-    const stream = await client.prompt(sessionId, blocks);
 
-    const streamStart = Date.now();
-    let fullText = '';
-    let lastUpdate = 0; // Start at 0 to trigger first update immediately
-    let dirty = false;
-    let chunkCount = 0;
-    let firstChunkLogged = false;
-    let inToolCall = false;
-    // Track inflight card update to avoid concurrent PATCH conflicts
-    let inflightUpdate: Promise<void> | null = null;
+    // ── Wire up interactive permission requests ──
+    const permChatKey = msg.rootId || msg.chatId;
+    let permCleanup: (() => void) | null = null;
 
-    for await (const event of stream) {
-      chunkCount++;
+    if (!this.config.autoApprove) {
+      const onPermission = async (req: any) => {
+        const permId = req._permId as string;
+        const toolName = req.toolCall?.title || req.toolName || 'tool';
+        const options: Array<{ optionId: string; name: string; kind: string }> = (req.options || []).map((o: any) => ({
+          optionId: o.optionId || '',
+          name: o.name || o.label || o.kind || '',
+          kind: o.kind || '',
+        }));
 
-      switch (event.type) {
-        case 'text':
-          if (!firstChunkLogged) {
-            console.log(
-              `[router] First chunk: session=${sessionId}, latency=${Date.now() - streamStart}ms`,
-            );
-            firstChunkLogged = true;
-          }
-          fullText += event.text;
-          dirty = true;
-          inToolCall = false;
-          break;
-        case 'tool_call':
-          console.log(`[router] Tool call: ${event.title}, session=${sessionId}`);
-          dirty = true;
-          inToolCall = true;
-          break;
-      }
+        console.log(`[router] Permission request: tool=${toolName}, permId=${permId}, options=${options.length}`);
 
-      // Throttled card update (300ms, like acp-link)
-      const now = Date.now();
-      if (now - lastUpdate >= CARD_UPDATE_INTERVAL && dirty) {
-        // Check if previous update finished
-        const shouldSend = !inflightUpdate || await isSettled(inflightUpdate);
-        if (shouldSend) {
-          const trimmed = fullText.replace(/^\n+/, '');
-          const snapshot = inToolCall ? `${trimmed}\n...` : trimmed;
-          inflightUpdate = adapter.updateReply(handle, snapshot || '...').catch(err => {
-            console.warn(`[router] Card update failed (will continue): ${err}`);
+        // Format permission message for the user
+        let permMsg = `🔐 **Permission Request**: ${toolName}\n\n`;
+        options.forEach((opt, i) => {
+          const kindLabel = formatPermKind(opt.kind);
+          permMsg += `  **${i + 1}** — ${opt.name || kindLabel}\n`;
+        });
+        permMsg += `\nReply with a number (1-${options.length}) to choose:`;
+
+        // Send to IM
+        try {
+          await adapter.sendText(msg.chatId, permMsg, msg.messageId);
+        } catch (err) {
+          console.warn(`[router] Failed to send permission prompt: ${err}`);
+        }
+
+        // Update the card to show waiting state
+        try {
+          await adapter.updateReply(handle, `⏳ Waiting for permission: ${toolName}...`);
+        } catch { /* non-fatal */ }
+
+        // Register pending permission — will be resolved by tryResolvePermission
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(() => {
+            // Timeout: auto-select first allow option
+            console.warn(`[router] Permission timeout: ${permId}, auto-allowing`);
+            const allowOpt = options.find(o => o.kind === 'allow_always' || o.kind === 'allow_once') || options[0];
+            if (allowOpt) {
+              client.resolvePermission(permId, allowOpt.optionId);
+            }
+            this.pendingPermissions.delete(permChatKey);
+            resolve();
+          }, PERMISSION_TIMEOUT);
+
+          this.pendingPermissions.set(permChatKey, {
+            permId, client, options, toolName, resolve, timer,
           });
-          lastUpdate = now;
-          dirty = false;
+        });
+      };
+
+      client.on('permission_request', onPermission);
+      permCleanup = () => client.removeListener('permission_request', onPermission);
+    }
+
+    try {
+      const stream = await client.prompt(sessionId, blocks);
+
+      const streamStart = Date.now();
+      let fullText = '';
+      let lastUpdate = 0;
+      let dirty = false;
+      let chunkCount = 0;
+      let firstChunkLogged = false;
+      let inToolCall = false;
+      let inflightUpdate: Promise<void> | null = null;
+
+      for await (const event of stream) {
+        chunkCount++;
+
+        switch (event.type) {
+          case 'text':
+            if (!firstChunkLogged) {
+              console.log(
+                `[router] First chunk: session=${sessionId}, latency=${Date.now() - streamStart}ms`,
+              );
+              firstChunkLogged = true;
+            }
+            fullText += event.text;
+            dirty = true;
+            inToolCall = false;
+            break;
+          case 'tool_call':
+            console.log(`[router] Tool call: ${event.title}, session=${sessionId}`);
+            dirty = true;
+            inToolCall = true;
+            break;
+        }
+
+        // Throttled card update (300ms, like acp-link)
+        const now = Date.now();
+        if (now - lastUpdate >= CARD_UPDATE_INTERVAL && dirty) {
+          const shouldSend = !inflightUpdate || await isSettled(inflightUpdate);
+          if (shouldSend) {
+            const trimmed = fullText.replace(/^\n+/, '');
+            const snapshot = inToolCall ? `${trimmed}\n\n🔧 *${event.type === 'tool_call' ? (event as any).title : '...'}*` : trimmed;
+            inflightUpdate = adapter.updateReply(handle, snapshot || '...').catch(err => {
+              console.warn(`[router] Card update failed (will continue): ${err}`);
+            });
+            lastUpdate = now;
+            dirty = false;
+          }
         }
       }
-    }
 
-    // Wait for last inflight update
-    if (inflightUpdate) {
-      try { await inflightUpdate; } catch { /* already logged */ }
-    }
-
-    // Final card update
-    if (dirty || fullText.trim() === '') {
-      const finalText = fullText.trim() || '(no response)';
-      try {
-        await adapter.updateReply(handle, finalText);
-      } catch (err) {
-        console.error(`[router] Final card update failed: ${err}`);
+      // Wait for last inflight update
+      if (inflightUpdate) {
+        try { await inflightUpdate; } catch { /* already logged */ }
       }
-    }
 
-    console.log(
-      `[router] Stream complete: session=${sessionId}, chunks=${chunkCount}, ` +
-      `elapsed=${Date.now() - streamStart}ms, text=${fullText.length} chars`,
-    );
+      // Final card update
+      if (dirty || fullText.trim() === '') {
+        const finalText = fullText.trim() || '(no response)';
+        try {
+          await adapter.updateReply(handle, finalText);
+        } catch (err) {
+          console.error(`[router] Final card update failed: ${err}`);
+        }
+      }
+
+      console.log(
+        `[router] Stream complete: session=${sessionId}, chunks=${chunkCount}, ` +
+        `elapsed=${Date.now() - streamStart}ms, text=${fullText.length} chars`,
+      );
+    } finally {
+      if (permCleanup) permCleanup();
+      // Clean up any lingering pending permission for this chat
+      this.pendingPermissions.delete(permChatKey);
+    }
   }
 
   /**
    * Keepalive: ping workers to keep auth tokens fresh.
    */
+  /**
+   * Keepalive: uses a dedicated kiro-cli process (not a business worker)
+   * to send periodic heartbeats. Prevents auth token expiry.
+   * Like acp-link's spawn_keepalive + keepalive_once pattern.
+   */
   private async keepalive(): Promise<void> {
-    for (let i = 0; i < this.workers.length; i++) {
-      const worker = this.workers[i];
-      if (!worker?.alive || !worker.client.isAlive) continue;
+    const MAX_RETRIES = 3;
 
-      try {
-        const sid = await worker.client.newSession(this.config.cwd);
-        const stream = await worker.client.prompt(sid, [textBlock('hello')]);
-        for await (const _ of stream) { /* drain */ }
-        console.log(`[router] Keepalive OK: worker-${i}`);
-      } catch (err) {
-        console.warn(`[router] Keepalive failed for worker-${i}:`, err);
-        worker.alive = false;
+    // Ensure dedicated keepalive client exists
+    if (!this.keepaliveClient || !this.keepaliveClient.isAlive) {
+      this.keepaliveClient = null;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const client = new AcpClient({
+            cmd: this.config.kiroCmd,
+            args: this.config.kiroArgs,
+            cwd: this.config.cwd,
+            autoApprove: true, // keepalive always auto-approve
+            extraEnv: this.config.extraEnv,
+          });
+          await Promise.race([
+            client.start(),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('timeout')), 10_000),
+            ),
+          ]);
+          this.keepaliveClient = client;
+          console.log(`[router] Keepalive worker initialized (attempt ${attempt})`);
+          break;
+        } catch (err) {
+          console.warn(`[router] Keepalive worker init failed (attempt ${attempt}/${MAX_RETRIES}): ${err}`);
+          if (attempt < MAX_RETRIES) {
+            // Exponential backoff: 5s, 10s, 15s
+            await new Promise(r => setTimeout(r, attempt * 5000));
+          }
+        }
       }
     }
+
+    if (!this.keepaliveClient || !this.keepaliveClient.isAlive) {
+      console.error('[router] Keepalive: all retry attempts failed');
+      return;
+    }
+
+    // Send heartbeat via dedicated client
+    try {
+      const sid = await this.keepaliveClient.newSession(this.config.cwd);
+      const stream = await this.keepaliveClient.prompt(sid, [textBlock('hello')]);
+      for await (const _ of stream) { /* drain */ }
+      console.log('[router] Keepalive heartbeat OK');
+    } catch (err) {
+      console.warn(`[router] Keepalive heartbeat failed: ${err}`);
+      // Mark as dead so next cycle will re-create
+      try { await this.keepaliveClient.stop(); } catch { /* ignore */ }
+      this.keepaliveClient = null;
+    }
+  }
+
+  // ── Interactive Permission Resolution ──
+
+  /**
+   * Try to resolve a pending permission request from a user's reply.
+   * Returns true if the message was consumed as a permission reply.
+   *
+   * Accepted inputs:
+   *   - Number: "1", "2", "3" → select option by index
+   *   - Keywords: "y"/"yes"/"allow"/"允许" → first allow option
+   *   - Keywords: "n"/"no"/"deny"/"拒绝" → first reject option
+   */
+  private tryResolvePermission(
+    chatKey: string,
+    adapter: BaseAdapter,
+    msg: InboundMessage,
+  ): boolean {
+    const pending = this.pendingPermissions.get(chatKey);
+    if (!pending) return false;
+
+    const text = msg.text.trim();
+
+    // Accept: "1", "2", "3"
+    const numMatch = text.match(/^(\d+)$/);
+    if (numMatch) {
+      const idx = parseInt(numMatch[1], 10) - 1;
+      if (idx >= 0 && idx < pending.options.length) {
+        const chosen = pending.options[idx];
+        console.log(`[router] Permission resolved by user: permId=${pending.permId}, choice=${idx + 1} (${chosen.kind})`);
+        clearTimeout(pending.timer);
+        pending.client.resolvePermission(pending.permId, chosen.optionId);
+        this.pendingPermissions.delete(chatKey);
+        pending.resolve();
+        adapter.sendText(msg.chatId, `✅ Permission: ${chosen.name || formatPermKind(chosen.kind)}`, msg.messageId).catch(() => {});
+        return true;
+      }
+    }
+
+    // Keyword shortcuts
+    const lower = text.toLowerCase();
+    if (['y', 'yes', 'allow', '允许', '是'].includes(lower)) {
+      const opt = pending.options.find(o => o.kind === 'allow_always' || o.kind === 'allow_once') || pending.options[0];
+      if (opt) {
+        console.log(`[router] Permission approved (keyword): permId=${pending.permId}`);
+        clearTimeout(pending.timer);
+        pending.client.resolvePermission(pending.permId, opt.optionId);
+        this.pendingPermissions.delete(chatKey);
+        pending.resolve();
+        adapter.sendText(msg.chatId, `✅ Allowed: ${pending.toolName}`, msg.messageId).catch(() => {});
+        return true;
+      }
+    }
+    if (['n', 'no', 'deny', 'reject', '拒绝', '否'].includes(lower)) {
+      const opt = pending.options.find(o => o.kind === 'reject_once' || o.kind === 'reject_always')
+        || pending.options[pending.options.length - 1];
+      if (opt) {
+        console.log(`[router] Permission denied (keyword): permId=${pending.permId}`);
+        clearTimeout(pending.timer);
+        pending.client.resolvePermission(pending.permId, opt.optionId);
+        this.pendingPermissions.delete(chatKey);
+        pending.resolve();
+        adapter.sendText(msg.chatId, `❌ Denied: ${pending.toolName}`, msg.messageId).catch(() => {});
+        return true;
+      }
+    }
+
+    // Not a valid permission reply
+    return false;
   }
 
   /**
    * Graceful shutdown.
    */
+  /**
+   * Cleanup old log files (like acp-link's cleanup_old_logs).
+   */
+  private cleanupOldLogs(): void {
+    try {
+      const fs = require('node:fs') as typeof import('node:fs');
+      const path = require('node:path') as typeof import('node:path');
+      const { KTI_HOME } = require('./config.js') as { KTI_HOME: string };
+      const logDir = path.join(KTI_HOME, 'logs');
+
+      const entries = fs.readdirSync(logDir, { withFileTypes: true });
+      const cutoff = Date.now() - this.config.sessionRetention * 24 * 60 * 60 * 1000;
+      let removed = 0;
+
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        // Only clean rotated logs (bridge.log.1, bridge.log.2, etc.)
+        if (!entry.name.match(/^bridge\.log\.\d+$/)) continue;
+        const filePath = path.join(logDir, entry.name);
+        const stat = fs.statSync(filePath);
+        if (stat.mtimeMs < cutoff) {
+          fs.unlinkSync(filePath);
+          removed++;
+        }
+      }
+
+      if (removed > 0) console.log(`[router] Log cleanup: removed ${removed} old log files`);
+    } catch { /* non-fatal */ }
+  }
+
   async shutdown(): Promise<void> {
     console.log('[router] Shutting down...');
     this.running = false;
@@ -525,6 +791,12 @@ export class MessageRouter {
       ]);
     }
 
+    // Stop keepalive worker
+    if (this.keepaliveClient) {
+      try { await this.keepaliveClient.stop(); } catch { /* ignore */ }
+      this.keepaliveClient = null;
+    }
+
     // Stop all workers
     await Promise.allSettled(
       this.workers.map((w, i) => {
@@ -541,6 +813,16 @@ export class MessageRouter {
 }
 
 // ── Helpers ──
+
+function formatPermKind(kind: string): string {
+  switch (kind) {
+    case 'allow_always': return 'Allow Always';
+    case 'allow_once': return 'Allow Once';
+    case 'reject_once': return 'Deny Once';
+    case 'reject_always': return 'Deny Always';
+    default: return kind;
+  }
+}
 
 function isSettled(promise: Promise<any>): Promise<boolean> {
   return Promise.race([
