@@ -62,6 +62,9 @@ for (const filePath of adapterFiles) {
 const brokerFiles = [
   path.join(base, 'dist', 'lib', 'bridge', 'permission-broker.js'),
   path.join(base, 'src', 'lib', 'bridge', 'permission-broker.ts'),
+  // Also patch bridge-manager for the isNumericPermissionShortcut fix
+  path.join(base, 'dist', 'lib', 'bridge', 'bridge-manager.js'),
+  path.join(base, 'src', 'lib', 'bridge', 'bridge-manager.ts'),
 ];
 
 for (const filePath of brokerFiles) {
@@ -87,6 +90,38 @@ for (const filePath of brokerFiles) {
     /(`Choose an action:`)/g,
     '`Choose an action:\\n\\nReply: 1 Allow · 2 Allow Session · 3 Deny`'
   );
+
+  // Patch 3: Enable numeric permission shortcuts for ALL platforms (not just feishu/qq)
+  // Upstream only routes "1/2/3" text replies via non-session-locked path for feishu/qq.
+  // Discord/Telegram use inline buttons instead, but we removed buttons.
+  // Without this patch, Discord "1/2/3" replies deadlock on the session lock.
+  // Match both formats:
+  //   src (.ts): channelType !== 'feishu' && channelType !== 'qq'
+  //   dist (.js): adapter.channelType === 'feishu' || adapter.channelType === 'qq'
+  const shortcutPatterns = [
+    // src format (isNumericPermissionShortcut function)
+    /channelType\s*!==\s*['"]feishu['"]\s*&&\s*channelType\s*!==\s*['"]qq['"]/g,
+    // dist format (inline check in handleIncomingEvent)
+    /adapter\.channelType\s*===\s*['"]feishu['"]\s*\|\|\s*adapter\.channelType\s*===\s*['"]qq['"]/g,
+  ];
+  let shortcutPatched = false;
+  for (const pattern of shortcutPatterns) {
+    if (pattern.test(modified)) {
+      modified = modified.replace(pattern, (match) => {
+        if (match.includes('!==')) {
+          // src format: condition that returns false for non-feishu/qq → always false
+          return 'false /* PATCHED_SHORTCUT_BY_KIRO_TO_IM */';
+        } else {
+          // dist format: condition that matches feishu/qq → always true
+          return 'true /* PATCHED_SHORTCUT_BY_KIRO_TO_IM: enable for all platforms */';
+        }
+      });
+      shortcutPatched = true;
+    }
+  }
+  if (shortcutPatched) {
+    console.log(`[patch] ${path.basename(filePath)}: Enabled permission shortcuts for all platforms`);
+  }
 
   if (modified !== content) {
     fs.writeFileSync(filePath, modified, 'utf-8');
