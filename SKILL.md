@@ -86,6 +86,17 @@ Interactive setup wizard. Collect input one field at a time:
 
 **Step 2 — Collect tokens per channel**
 
+For each enabled channel, collect credentials. **IMPORTANT platform-specific rules:**
+
+- **Telegram**: Collect KTI_TG_BOT_TOKEN (required). Then KTI_TG_CHAT_ID or KTI_TG_ALLOWED_USERS — at least one MUST be set, otherwise the bot rejects all messages.
+- **Discord**: Collect KTI_DISCORD_BOT_TOKEN (required). Then at least ONE of these MUST be set (Discord uses default-deny — empty = reject all):
+  - KTI_DISCORD_ALLOWED_USERS — Discord user IDs
+  - KTI_DISCORD_ALLOWED_CHANNELS — Discord channel IDs
+  - KTI_DISCORD_ALLOWED_GUILDS — Discord server/guild IDs
+  **DO NOT leave all three empty.** "Allow all" is NOT supported for Discord. Ask the user for at least a guild ID.
+- **Feishu**: Collect KTI_FEISHU_APP_ID and KTI_FEISHU_APP_SECRET (required). KTI_FEISHU_DOMAIN (optional, default: https://open.feishu.cn). KTI_FEISHU_ALLOWED_USERS (optional, empty = allow all).
+- **QQ**: Collect KTI_QQ_APP_ID and KTI_QQ_APP_SECRET (required). KTI_QQ_ALLOWED_USERS (optional).
+
 **Step 3 — Kiro settings**
 - **kiro-cli path** (optional, auto-detected from PATH)
 - **kiro-cli arguments** (default: `acp`)
