@@ -65,7 +65,7 @@ export class KiroAcpProvider implements LLMProvider {
   private workers: WorkerState[] = [];
   private config: KiroProviderConfig;
   private pendingPerms: PendingPermissions;
-  private sessionWorkerMap = new Map<string, number>(); // sessionId -> workerIdx
+  private sessionWorkerMap = new Map<string, number>();
 
   constructor(config: KiroProviderConfig, pendingPerms: PendingPermissions) {
     this.config = config;

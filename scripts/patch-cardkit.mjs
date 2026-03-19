@@ -20,12 +20,83 @@ const base = path.join(import.meta.dirname || '.', '..', 'node_modules', 'claude
 
 let totalPatched = 0;
 
-// ── Patch 1: Disable CardKit streaming cards ──
+// ── Patch 1: Replace CardKit streaming cards with native REST API ──
+// Instead of disabling streaming cards entirely, replace the CardKit-based
+// implementation with acp-link's approach: im/v1/messages reply + PATCH update.
+// This gives real-time streaming text in Feishu without CardKit dependency.
 
 const adapterFiles = [
   path.join(base, 'dist', 'lib', 'bridge', 'adapters', 'feishu-adapter.js'),
   path.join(base, 'src', 'lib', 'bridge', 'adapters', 'feishu-adapter.ts'),
 ];
+
+// The native createStreamingCard implementation using im/v1/messages API
+const nativeCreateStreamingCard = `
+    // ${PATCH_MARKER}: Native streaming card using im/v1/messages API (like acp-link).
+    if (!this.restClient || this.activeCards.has(chatId)) return Promise.resolve(false);
+    const _existing = this.cardCreatePromises.get(chatId);
+    if (_existing) return _existing;
+
+    const _promise = (async () => {
+      try {
+        const _tokenResp = await this.restClient.auth.v3.tenantAccessToken.internal({
+          data: { app_id: this.restClient.appId, app_secret: this.restClient.appSecret },
+        });
+        const _token = _tokenResp?.tenant_access_token;
+        if (!_token) { console.warn('[feishu-adapter] No token for streaming card'); return false; }
+
+        const _cardContent = JSON.stringify({ elements: [{ tag: 'markdown', content: '...' }] });
+        const _domain = this.restClient.domain || 'https://open.feishu.cn';
+        const _apiBase = _domain.includes('/open-apis') ? _domain : _domain + '/open-apis';
+        const _replyUrl = _apiBase + '/im/v1/messages/' + (replyToMessageId || '') + '/reply';
+
+        const _resp = await fetch(_replyUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + _token },
+          body: JSON.stringify({ content: _cardContent, msg_type: 'interactive' }),
+        });
+        const _data = await _resp.json();
+        if (_data.code !== 0) { console.warn('[feishu-adapter] replyCard failed:', _data.msg); return false; }
+
+        const _messageId = _data.data?.message_id || '';
+        if (!_messageId) return false;
+
+        this.activeCards.set(chatId, {
+          cardId: 'native-' + _messageId, messageId: _messageId,
+          accumulatedText: '', toolsSummary: '', throttleTimer: null,
+          _nativeToken: _token, _nativeApiBase: _apiBase,
+        });
+        console.log('[feishu-adapter] Streaming card created (native):', _messageId);
+        return true;
+      } catch (_err) {
+        console.warn('[feishu-adapter] Native streaming card failed:', _err?.message || _err);
+        return false;
+      } finally { this.cardCreatePromises.delete(chatId); }
+    })();
+    this.cardCreatePromises.set(chatId, _promise);
+    return _promise;`;
+
+// The native updateCardContent implementation
+const nativeUpdateCardContent = `
+    // ${PATCH_MARKER}: Native PATCH update (like acp-link's update_card).
+    const _state = this.activeCards.get(chatId);
+    if (!_state) return;
+    _state.accumulatedText = text;
+    if (_state.throttleTimer) return;
+    _state.throttleTimer = setTimeout(async () => {
+      _state.throttleTimer = null;
+      const _s = this.activeCards.get(chatId);
+      if (!_s || !_s._nativeToken) return;
+      const _cc = JSON.stringify({ elements: [{ tag: 'markdown', content: _s.accumulatedText || '...' }] });
+      try {
+        await fetch(_s._nativeApiBase + '/im/v1/messages/' + _s.messageId, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + _s._nativeToken },
+          body: JSON.stringify({ content: _cc, msg_type: 'interactive' }),
+        });
+      } catch (_e) { console.warn('[feishu-adapter] Native updateCard failed:', _e?.message || _e); }
+    }, 300);
+    return;`;
 
 for (const filePath of adapterFiles) {
   if (!fs.existsSync(filePath)) continue;
@@ -35,23 +106,40 @@ for (const filePath of adapterFiles) {
     continue;
   }
 
-  const patterns = [
+  // Replace createStreamingCard method body
+  const createPatterns = [
     /(\s*)(private\s+)?createStreamingCard\s*\([^)]*\)\s*(?::\s*Promise<boolean>\s*)?\{/,
     /(\s*)createStreamingCard\s*\([^)]*\)\s*\{/,
   ];
 
-  for (const pattern of patterns) {
+  let patched = false;
+  for (const pattern of createPatterns) {
     const match = content.match(pattern);
     if (match) {
-      const indent = match[1] || '  ';
-      content = content.replace(match[0],
-        match[0] + `\n${indent}  // ${PATCH_MARKER}: Disable CardKit streaming cards.\n${indent}  return Promise.resolve(false);`
-      );
-      fs.writeFileSync(filePath, content, 'utf-8');
-      console.log(`[patch] ${path.basename(filePath)}: CardKit streaming disabled`);
-      totalPatched++;
+      content = content.replace(match[0], match[0] + '\n' + nativeCreateStreamingCard + '\n    // --- Original CardKit code below (unreachable) ---');
+      patched = true;
       break;
     }
+  }
+
+  // Replace updateCardContent method body
+  const updatePatterns = [
+    /(\s*)(private\s+)?updateCardContent\s*\([^)]*\)\s*(?::\s*void\s*)?\{/,
+    /(\s*)updateCardContent\s*\([^)]*\)\s*\{/,
+  ];
+
+  for (const pattern of updatePatterns) {
+    const match = content.match(pattern);
+    if (match) {
+      content = content.replace(match[0], match[0] + '\n' + nativeUpdateCardContent + '\n    return;\n    // --- Original CardKit code below (unreachable) ---');
+      break;
+    }
+  }
+
+  if (patched) {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    console.log(`[patch] ${path.basename(filePath)}: Native streaming cards enabled (im/v1/messages API)`);
+    totalPatched++;
   }
 }
 
