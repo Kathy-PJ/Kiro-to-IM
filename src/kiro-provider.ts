@@ -265,15 +265,16 @@ export class KiroAcpProvider implements LLMProvider {
                 // _permId is injected by acp-client.ts for matching the resolve callback
                 const permId = req._permId as string;
 
-                // Extract tool name from various possible field names
-                const toolName = req.toolName || req.tool_name || req.name ||
+                // Extract tool name from kiro-cli's actual params structure:
+                // { toolCall: { title: "Running: echo hello", toolCallId: "..." }, options: [...] }
+                const toolName = req.toolCall?.title || req.toolName || req.tool_name ||
                   req.options?.[0]?.label || 'tool';
 
                 // Extract description
-                const description = req.description || req.tool_description ||
-                  req.options?.map((o: any) => o.label).join(', ') || '';
+                const toolCallId = req.toolCall?.toolCallId || '';
+                const description = req.description || toolName;
 
-                console.log(`[kiro-provider] Permission request: permId=${permId}, tool=${toolName}`);
+                console.log(`[kiro-provider] Permission request: permId=${permId}, tool=${toolName}, toolCallId=${toolCallId}`);
 
                 // Emit permission_request SSE for the bridge
                 controller.enqueue(sseEvent('permission_request', {
