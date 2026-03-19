@@ -16,10 +16,12 @@ import * as bridgeManager from 'claude-to-im/src/lib/bridge/bridge-manager.js';
 import 'claude-to-im/src/lib/bridge/adapters/index.js';
 
 import { loadConfig, configToSettings, KTI_HOME } from './config.js';
+import type { Config } from './config.js';
 import { JsonFileStore } from './store.js';
 import { KiroAcpProvider } from './kiro-provider.js';
 import { PendingPermissions } from './permission-gateway.js';
 import { setupLogger } from './logger.js';
+import { startMcpServer } from './mcp-server.js';
 
 const RUNTIME_DIR = path.join(KTI_HOME, 'runtime');
 const STATUS_FILE = path.join(RUNTIME_DIR, 'status.json');
@@ -233,6 +235,11 @@ async function main(): Promise<void> {
     console.log(`[kiro-to-im] Forwarding auth env vars to kiro-cli: ${Object.keys(extraEnv).join(', ')}`);
   }
 
+  // Determine MCP port (0 if disabled)
+  const mcpPort = (config.feishuAppId && config.feishuAppSecret)
+    ? parseInt(process.env.KTI_MCP_PORT || '9800', 10)
+    : 0;
+
   const provider = new KiroAcpProvider(
     {
       cmd: kiroCliPath,
@@ -241,6 +248,7 @@ async function main(): Promise<void> {
       cwd: config.defaultWorkDir,
       autoApprove: config.autoApprove ?? false,
       extraEnv: Object.keys(extraEnv).length > 0 ? extraEnv : undefined,
+      mcpPort,
     },
     pendingPerms,
   );
@@ -278,6 +286,22 @@ async function main(): Promise<void> {
       );
     }
     process.exit(1);
+  }
+
+  // Start embedded MCP Server if Feishu credentials are available
+  if (config.feishuAppId && config.feishuAppSecret) {
+    const mcpPort = parseInt(process.env.KTI_MCP_PORT || '9800', 10);
+    try {
+      await startMcpServer(
+        config.feishuAppId,
+        config.feishuAppSecret,
+        config.feishuDomain || 'https://open.feishu.cn',
+        mcpPort,
+      );
+      console.log(`[kiro-to-im] MCP Server started on port ${mcpPort} (feishu_send_file tool available)`);
+    } catch (err) {
+      console.warn(`[kiro-to-im] MCP Server failed to start (non-fatal): ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   const gateway = {

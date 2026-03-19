@@ -229,12 +229,13 @@ export class AcpClient extends EventEmitter {
 
   /**
    * Create a new ACP session.
+   * @param mcpServers - Optional MCP server configs to register with kiro-cli
    */
-  async newSession(cwd: string): Promise<string> {
+  async newSession(cwd: string, mcpServers?: Array<{ url: string }>): Promise<string> {
     if (!this.connection) throw new Error('ACP client not initialized');
     const result = await this.connection.newSession({
       cwd,
-      mcpServers: [],
+      mcpServers: mcpServers || [],
     });
     return (result as any).sessionId;
   }
@@ -242,12 +243,12 @@ export class AcpClient extends EventEmitter {
   /**
    * Load (resume) an existing ACP session.
    */
-  async loadSession(sessionId: string, cwd: string): Promise<string> {
+  async loadSession(sessionId: string, cwd: string, mcpServers?: Array<{ url: string }>): Promise<string> {
     if (!this.connection) throw new Error('ACP client not initialized');
     const result = await this.connection.loadSession({
       sessionId,
       cwd,
-      mcpServers: [],
+      mcpServers: mcpServers || [],
     });
     return (result as any).sessionId;
   }

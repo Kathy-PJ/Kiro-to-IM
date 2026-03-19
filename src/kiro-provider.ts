@@ -52,6 +52,8 @@ export interface KiroProviderConfig {
   autoApprove?: boolean;
   /** Extra environment variables to pass to kiro-cli (e.g. AWS credentials) */
   extraEnv?: Record<string, string>;
+  /** MCP server port for Feishu tools (0 = disabled) */
+  mcpPort?: number;
 }
 
 /**
@@ -230,6 +232,11 @@ export class KiroAcpProvider implements LLMProvider {
             // Build content blocks from prompt and files
             const blocks = self.buildContentBlocks(params.prompt, params.files);
 
+            // Build MCP servers list (if MCP server is running)
+            const mcpServers = self.config.mcpPort
+              ? [{ url: `http://127.0.0.1:${self.config.mcpPort}/mcp` }]
+              : undefined;
+
             // Resolve or create ACP session
             let sessionId: string;
             if (params.sdkSessionId) {
@@ -237,16 +244,19 @@ export class KiroAcpProvider implements LLMProvider {
                 sessionId = await client.loadSession(
                   params.sdkSessionId,
                   params.workingDirectory || self.config.cwd || process.cwd(),
+                  mcpServers,
                 );
               } catch {
                 // Load failed — create new session
                 sessionId = await client.newSession(
                   params.workingDirectory || self.config.cwd || process.cwd(),
+                  mcpServers,
                 );
               }
             } else {
               sessionId = await client.newSession(
                 params.workingDirectory || self.config.cwd || process.cwd(),
+                mcpServers,
               );
             }
 
