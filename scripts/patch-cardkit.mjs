@@ -143,21 +143,21 @@ for (const filePath of adapterFiles) {
   const streamEndMatch = content.match(streamEndPattern);
   if (streamEndMatch) {
     content = content.replace(streamEndMatch[0], streamEndMatch[0] + `
-    // ${PATCH_MARKER}: Finalize native streaming card
+    // ${PATCH_MARKER}: Finalize native streaming card (fully non-blocking)
     const _cid = arguments[0], _status = arguments[1], _responseText = arguments[2];
-    // Wait for card creation to finish (fixes race condition)
-    const _createProm = _cardPromises.get(_cid);
-    if (_createProm) { await _createProm; _cardPromises.delete(_cid); }
     const _card = _nativeCards.get(_cid);
     if (_card) {
       if (_card.timer) { clearTimeout(_card.timer); _card.timer = null; }
-      // Fire-and-forget final update (don't block bridge-manager cleanup)
+      // Fire-and-forget final update
       const _finalText = (_responseText || _card.text || '').trim() || '(no response)';
       _nativeUpdateCard(_card.token, _card.apiBase, _card.messageId, _finalText).catch(() => {});
       _nativeCards.delete(_cid);
       console.log('[feishu-streaming] Card finalized');
-      return true; // Skip fallback message (content already in streaming card)
+      return true;
     }
+    // Card not created yet or never created — clean up and let bridge-manager handle
+    _cardPromises.delete(_cid);
+    _cardCreating.delete(_cid);
     return false;
     // --- Original onStreamEnd below (unreachable) ---`);
     patched = true;
