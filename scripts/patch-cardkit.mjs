@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 /**
- * Patch: downgrade cardkit.v2 → cardkit.v1 in feishu-adapter
+ * Patch: disable CardKit streaming cards in feishu-adapter.
  *
- * The claude-to-im Feishu adapter uses cardkit.v2 API, but
- * @larksuiteoapi/node-sdk <= 1.59.0 only has cardkit.v1.
- * This patch replaces all v2 calls with v1 as a workaround.
+ * CardKit v2 doesn't exist in @larksuiteoapi/node-sdk <= 1.59.0,
+ * and CardKit v1 has a different API format ("body is nil" error).
+ *
+ * We disable streaming cards entirely by making createStreamingCard()
+ * return false immediately. The bridge-manager falls back to sending
+ * the final response as a regular text message.
+ *
+ * IMPORTANT: Must patch BOTH dist/ (.js) AND src/ (.ts) because
+ * esbuild resolves from dist/ (the package.json "main" field).
  *
  * Run after `npm install`:
  *   node scripts/patch-cardkit.mjs
@@ -13,31 +19,62 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const adapterPath = path.join(
-  import.meta.dirname || '.',
-  '..',
-  'node_modules',
-  'claude-to-im',
-  'src',
-  'lib',
-  'bridge',
-  'adapters',
-  'feishu-adapter.ts',
-);
+const PATCH_MARKER = 'PATCHED_BY_KIRO_TO_IM';
 
-if (!fs.existsSync(adapterPath)) {
-  console.log('[patch-cardkit] feishu-adapter.ts not found, skipping');
-  process.exit(0);
+const filesToPatch = [
+  // dist/ JS — this is what esbuild actually bundles
+  path.join(import.meta.dirname || '.', '..', 'node_modules', 'claude-to-im', 'dist', 'lib', 'bridge', 'adapters', 'feishu-adapter.js'),
+  // src/ TS — patch this too for tsc/typecheck
+  path.join(import.meta.dirname || '.', '..', 'node_modules', 'claude-to-im', 'src', 'lib', 'bridge', 'adapters', 'feishu-adapter.ts'),
+];
+
+let totalPatched = 0;
+
+for (const filePath of filesToPatch) {
+  if (!fs.existsSync(filePath)) {
+    console.log(`[patch-cardkit] ${path.basename(filePath)} not found, skipping`);
+    continue;
+  }
+
+  let content = fs.readFileSync(filePath, 'utf-8');
+
+  if (content.includes(PATCH_MARKER)) {
+    console.log(`[patch-cardkit] ${path.basename(filePath)} already patched`);
+    continue;
+  }
+
+  // Pattern: find createStreamingCard method and inject early return
+  // Works for both .ts (with `private`) and .js (without)
+  const patterns = [
+    // TypeScript: private createStreamingCard(...)
+    /(\s*)(private\s+)?createStreamingCard\s*\([^)]*\)\s*(?::\s*Promise<boolean>\s*)?\{/,
+    // JavaScript: createStreamingCard(...)
+    /(\s*)createStreamingCard\s*\([^)]*\)\s*\{/,
+  ];
+
+  let patched = false;
+  for (const pattern of patterns) {
+    const match = content.match(pattern);
+    if (match) {
+      const indent = match[1] || '  ';
+      const original = match[0];
+      const replacement = original + `\n${indent}  // ${PATCH_MARKER}: Disable CardKit streaming cards.\n${indent}  // CardKit v2 not in SDK, v1 has incompatible format. Fallback to regular messages.\n${indent}  return Promise.resolve(false);`;
+      content = content.replace(original, replacement);
+      fs.writeFileSync(filePath, content, 'utf-8');
+      console.log(`[patch-cardkit] Patched ${path.basename(filePath)}: createStreamingCard() → always returns false`);
+      patched = true;
+      totalPatched++;
+      break;
+    }
+  }
+
+  if (!patched) {
+    console.log(`[patch-cardkit] ${path.basename(filePath)}: createStreamingCard pattern not found`);
+  }
 }
 
-let content = fs.readFileSync(adapterPath, 'utf-8');
-const count = (content.match(/cardkit\.v2/g) || []).length;
-
-if (count === 0) {
-  console.log('[patch-cardkit] No cardkit.v2 references found, already patched or not needed');
-  process.exit(0);
+if (totalPatched > 0) {
+  console.log(`[patch-cardkit] Done: ${totalPatched} file(s) patched`);
+} else {
+  console.log('[patch-cardkit] No files needed patching');
 }
-
-content = content.replace(/cardkit\.v2/g, 'cardkit.v1');
-fs.writeFileSync(adapterPath, content, 'utf-8');
-console.log(`[patch-cardkit] Replaced ${count} cardkit.v2 → cardkit.v1 references`);
