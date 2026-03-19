@@ -48,6 +48,8 @@ export interface KiroProviderConfig {
   poolSize: number;
   /** Working directory for kiro-cli (default: cwd) */
   cwd?: string;
+  /** Auto-approve all permission requests (default: false) */
+  autoApprove?: boolean;
   /** Extra environment variables to pass to kiro-cli (e.g. AWS credentials) */
   extraEnv?: Record<string, string>;
 }
@@ -95,6 +97,7 @@ export class KiroAcpProvider implements LLMProvider {
       cmd: this.config.cmd,
       args: this.config.args,
       cwd: this.config.cwd,
+      autoApprove: this.config.autoApprove,
       extraEnv: this.config.extraEnv,
     });
 
@@ -255,8 +258,43 @@ export class KiroAcpProvider implements LLMProvider {
             // Track this session's worker for future routing
             self.sessionWorkerMap.set(sessionId, idx);
 
-            // Permissions are always auto-approved at the ACP level (in acp-client.ts),
-            // matching acp-link's Rust implementation. No IM-based permission UI.
+            // Permissions are auto-approved at the ACP level if KTI_AUTO_APPROVE=true.
+            // Otherwise, permission requests are forwarded to IM for user reply (1/2/3).
+            if (!self.config.autoApprove) {
+              client.removeAllListeners('permission_request');
+              client.on('permission_request', async (req: any) => {
+                const permId = req._permId as string;
+                const toolName = req.toolCall?.title || req.toolName || 'tool';
+
+                console.log(`[kiro-provider] Permission request → IM: permId=${permId}, tool=${toolName}`);
+
+                controller.enqueue(sseEvent('permission_request', {
+                  permissionRequestId: permId,
+                  toolName,
+                  toolInput: { description: toolName },
+                  suggestions: req.options?.map((o: any) => o.name || o.label) || [],
+                }));
+
+                const result = await self.pendingPerms.waitFor(permId);
+                console.log(`[kiro-provider] Permission resolved: permId=${permId}, behavior=${result.behavior}`);
+
+                if (result.behavior === 'allow') {
+                  const allowOption = req.options?.find((o: any) =>
+                    o.kind === 'allow_always' || o.kind === 'allow_once'
+                  ) || req.options?.[0];
+                  if (allowOption) {
+                    client.resolvePermission(permId, allowOption.optionId);
+                  }
+                } else {
+                  const denyOption = req.options?.find((o: any) =>
+                    o.kind === 'reject_once' || o.kind === 'reject_always'
+                  ) || req.options?.[req.options?.length - 1];
+                  if (denyOption) {
+                    client.resolvePermission(permId, denyOption.optionId);
+                  }
+                }
+              });
+            }
 
             // Send prompt and stream response
             const stream = await client.prompt(sessionId, blocks);

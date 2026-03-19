@@ -83,6 +83,8 @@ export interface AcpClientOptions {
   args: string[];
   /** Working directory for kiro-cli process */
   cwd?: string;
+  /** Auto-approve all permission requests (default: false) */
+  autoApprove?: boolean;
   /** Extra environment variables to pass to the kiro-cli process */
   extraEnv?: Record<string, string>;
 }
@@ -152,11 +154,10 @@ export class AcpClient extends EventEmitter {
     // Create client-side connection with our handler
     // The SDK routes notifications and requests to these callbacks
     const self = this;
+    const autoApprove = this.options.autoApprove ?? false;
     this.connection = new ClientSideConnection(
       (_conn) => ({
         // Called when agent asks for permission to use a tool
-        // Always auto-approve, matching acp-link's Rust implementation:
-        // no IM-based permission UI, permissions are handled at the ACP level.
         async requestPermission(params: any) {
           const option =
             params.options?.find((o: any) => o.kind === 'allow_always') ||
@@ -164,14 +165,25 @@ export class AcpClient extends EventEmitter {
             params.options?.[0];
 
           const toolTitle = params.toolCall?.title || 'tool';
-          console.log(`[acp-client] Auto-approve permission: ${toolTitle} → ${option?.optionId}`);
 
-          return {
-            outcome: {
-              outcome: 'selected' as const,
-              optionId: option?.optionId ?? '',
-            },
-          };
+          if (autoApprove) {
+            console.log(`[acp-client] Auto-approve permission: ${toolTitle} → ${option?.optionId}`);
+            return {
+              outcome: {
+                outcome: 'selected' as const,
+                optionId: option?.optionId ?? '',
+              },
+            };
+          }
+
+          // Forward to IM for user approval (text reply 1/2/3)
+          const permId = `perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          console.log(`[acp-client] Permission request → IM: ${toolTitle}, permId=${permId}`);
+          self.emit('permission_request', { ...params, _permId: permId });
+
+          return new Promise<any>((resolve) => {
+            self.once(`permission_resolved_${permId}`, resolve);
+          });
         },
 
         // Called on each streaming notification from agent
@@ -327,6 +339,15 @@ export class AcpClient extends EventEmitter {
 
   get isAlive(): boolean {
     return this.process !== null && this.process.exitCode === null;
+  }
+
+  /**
+   * Resolve a permission response from external handler (IM user reply).
+   */
+  resolvePermission(permId: string, optionId: string): void {
+    this.emit(`permission_resolved_${permId}`, {
+      outcome: { outcome: 'selected', optionId },
+    });
   }
 }
 

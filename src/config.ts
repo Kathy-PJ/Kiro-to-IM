@@ -44,6 +44,8 @@ export interface Config {
   qqAllowedUsers?: string[];
   qqImageEnabled?: boolean;
   qqMaxImageSize?: number;
+  // Auto-approve all tool permission requests without user confirmation
+  autoApprove?: boolean;
 }
 
 export const KTI_HOME = process.env.KTI_HOME || path.join(os.homedir(), ".kiro-to-im");
@@ -126,6 +128,7 @@ export function loadConfig(): Config {
     qqMaxImageSize: env.get("KTI_QQ_MAX_IMAGE_SIZE")
       ? Number(env.get("KTI_QQ_MAX_IMAGE_SIZE"))
       : undefined,
+    autoApprove: env.get("KTI_AUTO_APPROVE") === "true",
   };
 }
 
@@ -174,6 +177,8 @@ export function saveConfig(config: Config): void {
     out += formatEnvLine("KTI_QQ_IMAGE_ENABLED", String(config.qqImageEnabled));
   if (config.qqMaxImageSize !== undefined)
     out += formatEnvLine("KTI_QQ_MAX_IMAGE_SIZE", String(config.qqMaxImageSize));
+  if (config.autoApprove)
+    out += formatEnvLine("KTI_AUTO_APPROVE", "true");
 
   fs.mkdirSync(KTI_HOME, { recursive: true });
   const tmpPath = CONFIG_PATH + ".tmp";
