@@ -36,6 +36,7 @@ const nativeStreamingModule = `
 const _STREAM_UPDATE_INTERVAL = 300; // ms
 const _nativeCards = new Map(); // chatId → { messageId, token, apiBase, text, timer, inflightDone }
 const _cardCreating = new Set(); // chatId set — prevents duplicate card creation
+const _cardPromises = new Map(); // chatId → Promise — for onStreamEnd to await
 
 async function _getNativeToken(restClient) {
   try {
@@ -106,7 +107,7 @@ for (const filePath of adapterFiles) {
       const _replyTo = this.lastIncomingMessageId?.get(_chatId);
       if (_replyTo && this.restClient) {
         _cardCreating.add(_chatId);
-        (async () => {
+        const _createPromise = (async () => {
           const _tk = await _getNativeToken(this.restClient);
           if (!_tk) { _cardCreating.delete(_chatId); return; }
           const _domain = this.restClient?.domain || 'https://open.feishu.cn';
@@ -118,6 +119,7 @@ for (const filePath of adapterFiles) {
             console.log('[feishu-streaming] Card created:', _mid);
           }
         })().catch(() => { _cardCreating.delete(_chatId); });
+        _cardPromises.set(_chatId, _createPromise);
       }
       return;
     }
@@ -143,6 +145,9 @@ for (const filePath of adapterFiles) {
     content = content.replace(streamEndMatch[0], streamEndMatch[0] + `
     // ${PATCH_MARKER}: Finalize native streaming card
     const _cid = arguments[0], _status = arguments[1], _responseText = arguments[2];
+    // Wait for card creation to finish (fixes race condition)
+    const _createProm = _cardPromises.get(_cid);
+    if (_createProm) { await _createProm; _cardPromises.delete(_cid); }
     const _card = _nativeCards.get(_cid);
     if (_card) {
       if (_card.timer) { clearTimeout(_card.timer); _card.timer = null; }
