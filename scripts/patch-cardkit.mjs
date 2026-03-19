@@ -151,12 +151,12 @@ for (const filePath of adapterFiles) {
     const _card = _nativeCards.get(_cid);
     if (_card) {
       if (_card.timer) { clearTimeout(_card.timer); _card.timer = null; }
-      // Final update with complete text
+      // Fire-and-forget final update (don't block bridge-manager cleanup)
       const _finalText = (_responseText || _card.text || '').trim() || '(no response)';
-      await _nativeUpdateCard(_card.token, _card.apiBase, _card.messageId, _finalText);
+      _nativeUpdateCard(_card.token, _card.apiBase, _card.messageId, _finalText).catch(() => {});
       _nativeCards.delete(_cid);
       console.log('[feishu-streaming] Card finalized');
-      return false; // Let bridge-manager also handle cleanup (prevents session lock issues)
+      return true; // Skip fallback message (content already in streaming card)
     }
     return false;
     // --- Original onStreamEnd below (unreachable) ---`);
