@@ -48,8 +48,6 @@ export interface KiroProviderConfig {
   poolSize: number;
   /** Working directory for kiro-cli (default: cwd) */
   cwd?: string;
-  /** Auto-approve all permission requests (default: false) */
-  autoApprove: boolean;
   /** Extra environment variables to pass to kiro-cli (e.g. AWS credentials) */
   extraEnv?: Record<string, string>;
 }
@@ -97,7 +95,6 @@ export class KiroAcpProvider implements LLMProvider {
       cmd: this.config.cmd,
       args: this.config.args,
       cwd: this.config.cwd,
-      autoApprove: this.config.autoApprove,
       extraEnv: this.config.extraEnv,
     });
 
@@ -258,53 +255,8 @@ export class KiroAcpProvider implements LLMProvider {
             // Track this session's worker for future routing
             self.sessionWorkerMap.set(sessionId, idx);
 
-            // Set up permission handling if not auto-approve
-            if (!self.config.autoApprove) {
-              client.removeAllListeners('permission_request');
-              client.on('permission_request', async (req: any) => {
-                // _permId is injected by acp-client.ts for matching the resolve callback
-                const permId = req._permId as string;
-
-                // Extract tool name from kiro-cli's actual params structure:
-                // { toolCall: { title: "Running: echo hello", toolCallId: "..." }, options: [...] }
-                const toolName = req.toolCall?.title || req.toolName || req.tool_name ||
-                  req.options?.[0]?.label || 'tool';
-
-                // Extract description
-                const toolCallId = req.toolCall?.toolCallId || '';
-                const description = req.description || toolName;
-
-                console.log(`[kiro-provider] Permission request: permId=${permId}, tool=${toolName}, toolCallId=${toolCallId}`);
-
-                // Emit permission_request SSE for the bridge
-                controller.enqueue(sseEvent('permission_request', {
-                  permissionRequestId: permId,
-                  toolName,
-                  toolInput: { description },
-                  suggestions: req.options?.map((o: any) => o.label) || [],
-                }));
-
-                // Wait for IM user response
-                const result = await self.pendingPerms.waitFor(permId);
-                console.log(`[kiro-provider] Permission resolved: permId=${permId}, behavior=${result.behavior}`);
-
-                if (result.behavior === 'allow') {
-                  const allowOption = req.options?.find((o: any) =>
-                    o.kind === 'allow_always' || o.kind === 'allow_once'
-                  ) || req.options?.[0];
-                  if (allowOption) {
-                    client.resolvePermission(permId, allowOption.optionId);
-                  }
-                } else {
-                  const denyOption = req.options?.find((o: any) =>
-                    o.kind === 'reject_once' || o.kind === 'reject_always'
-                  ) || req.options?.[req.options?.length - 1];
-                  if (denyOption) {
-                    client.resolvePermission(permId, denyOption.optionId);
-                  }
-                }
-              });
-            }
+            // Permissions are always auto-approved at the ACP level (in acp-client.ts),
+            // matching acp-link's Rust implementation. No IM-based permission UI.
 
             // Send prompt and stream response
             const stream = await client.prompt(sessionId, blocks);

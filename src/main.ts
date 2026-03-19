@@ -239,7 +239,6 @@ async function main(): Promise<void> {
       args: kiroArgs,
       poolSize: config.kiroPoolSize,
       cwd: config.defaultWorkDir,
-      autoApprove: config.autoApprove ?? false,
       extraEnv: Object.keys(extraEnv).length > 0 ? extraEnv : undefined,
     },
     pendingPerms,

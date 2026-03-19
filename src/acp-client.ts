@@ -83,8 +83,6 @@ export interface AcpClientOptions {
   args: string[];
   /** Working directory for kiro-cli process */
   cwd?: string;
-  /** Auto-approve permission requests (default: true) */
-  autoApprove?: boolean;
   /** Extra environment variables to pass to the kiro-cli process */
   extraEnv?: Record<string, string>;
 }
@@ -106,10 +104,7 @@ export class AcpClient extends EventEmitter {
 
   constructor(options: AcpClientOptions) {
     super();
-    this.options = {
-      autoApprove: true,
-      ...options,
-    };
+    this.options = options;
   }
 
   get initialized(): boolean {
@@ -156,36 +151,27 @@ export class AcpClient extends EventEmitter {
 
     // Create client-side connection with our handler
     // The SDK routes notifications and requests to these callbacks
-    const autoApprove = this.options.autoApprove;
-    const emitter = this;
-
+    const self = this;
     this.connection = new ClientSideConnection(
       (_conn) => ({
         // Called when agent asks for permission to use a tool
+        // Always auto-approve, matching acp-link's Rust implementation:
+        // no IM-based permission UI, permissions are handled at the ACP level.
         async requestPermission(params: any) {
-          // Log the full params for debugging
-          console.log('[acp-client] requestPermission params:', JSON.stringify(params).slice(0, 500));
+          const option =
+            params.options?.find((o: any) => o.kind === 'allow_always') ||
+            params.options?.find((o: any) => o.kind === 'allow_once') ||
+            params.options?.[0];
 
-          if (autoApprove) {
-            const option =
-              params.options?.find((o: any) => o.kind === 'allow_always') ||
-              params.options?.find((o: any) => o.kind === 'allow_once') ||
-              params.options?.[0];
-            return {
-              outcome: {
-                outcome: 'selected' as const,
-                optionId: option?.optionId ?? '',
-              },
-            };
-          }
+          const toolTitle = params.toolCall?.title || 'tool';
+          console.log(`[acp-client] Auto-approve permission: ${toolTitle} → ${option?.optionId}`);
 
-          // Generate a unique permission request ID
-          const permId = `perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-          emitter.emit('permission_request', { ...params, _permId: permId });
-
-          return new Promise<any>((resolve) => {
-            emitter.once(`permission_resolved_${permId}`, resolve);
-          });
+          return {
+            outcome: {
+              outcome: 'selected' as const,
+              optionId: option?.optionId ?? '',
+            },
+          };
         },
 
         // Called on each streaming notification from agent
@@ -195,13 +181,13 @@ export class AcpClient extends EventEmitter {
 
           if (updateType === 'agent_message_chunk' || updateType === 'agentMessageChunk') {
             if (update.content?.type === 'text') {
-              emitter.emit('stream_event', {
+              self.emit('stream_event', {
                 type: 'text',
                 text: update.content.text,
               } as StreamEvent);
             }
           } else if (updateType === 'tool_call' || updateType === 'toolCall') {
-            emitter.emit('stream_event', {
+            self.emit('stream_event', {
               type: 'tool_call',
               title: update.title || 'Tool call',
             } as StreamEvent);
@@ -341,16 +327,6 @@ export class AcpClient extends EventEmitter {
 
   get isAlive(): boolean {
     return this.process !== null && this.process.exitCode === null;
-  }
-
-  /**
-   * Resolve a permission response from external handler.
-   * The permId must match the _permId from the permission_request event.
-   */
-  resolvePermission(permId: string, optionId: string): void {
-    this.emit(`permission_resolved_${permId}`, {
-      outcome: { outcome: 'selected', optionId },
-    });
   }
 }
 
