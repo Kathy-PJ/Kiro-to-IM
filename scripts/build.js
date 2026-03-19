@@ -10,9 +10,9 @@ await esbuild.build({
   external: [
     // discord.js optional native deps
     'bufferutil', 'utf-8-validate', 'zlib-sync', 'erlpack',
+    // ws optional deps
+    'utf-8-validate',
     // Node.js built-ins
-    'fs', 'path', 'os', 'crypto', 'http', 'https', 'net', 'tls',
-    'stream', 'events', 'url', 'util', 'child_process', 'worker_threads',
     'node:*',
   ],
   banner: { js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);" },
