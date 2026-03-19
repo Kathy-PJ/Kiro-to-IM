@@ -72,14 +72,24 @@ for (const filePath of brokerFiles) {
     continue;
   }
 
-  // Remove inlineButtons from permission cards
-  // Match multiline inlineButtons block with any indentation
-  const removed = content.replace(
+  // Remove inlineButtons from permission cards and add text reply instructions
+  let modified = content;
+
+  // Remove inlineButtons block
+  modified = modified.replace(
     /inlineButtons\s*:\s*\[[\s\S]*?(?:\]\s*,?\s*\]\s*,)/g,
     '// BUTTONS_REMOVED_BY_KIRO_TO_IM: inline buttons removed (cause Feishu API errors).'
   );
-  if (removed !== content) {
-    fs.writeFileSync(filePath, removed, 'utf-8');
+
+  // Add reply instructions to the permission message text (for non-QQ platforms)
+  // Find: `Choose an action:` and append reply instructions after it
+  modified = modified.replace(
+    /(`Choose an action:`)/g,
+    '`Choose an action:\\n\\nReply: 1 Allow · 2 Allow Session · 3 Deny`'
+  );
+
+  if (modified !== content) {
+    fs.writeFileSync(filePath, modified, 'utf-8');
     console.log(`[patch] ${path.basename(filePath)}: Permission buttons removed`);
     totalPatched++;
   }
