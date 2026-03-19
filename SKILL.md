@@ -89,11 +89,15 @@ Interactive setup wizard. Collect input one field at a time:
 For each enabled channel, collect credentials. **IMPORTANT platform-specific rules:**
 
 - **Telegram**: Collect KTI_TG_BOT_TOKEN (required). Then KTI_TG_CHAT_ID or KTI_TG_ALLOWED_USERS — at least one MUST be set, otherwise the bot rejects all messages.
-- **Discord**: Collect KTI_DISCORD_BOT_TOKEN (required). Then at least ONE of these MUST be set (Discord uses default-deny — empty = reject all):
-  - KTI_DISCORD_ALLOWED_USERS — Discord user IDs
-  - KTI_DISCORD_ALLOWED_CHANNELS — Discord channel IDs
-  - KTI_DISCORD_ALLOWED_GUILDS — Discord server/guild IDs
-  **DO NOT leave all three empty.** "Allow all" is NOT supported for Discord. Ask the user for at least a guild ID.
+- **Discord**: Collect KTI_DISCORD_BOT_TOKEN (required). Discord has TWO layers of authorization:
+  - **Layer 1 (required)**: KTI_DISCORD_ALLOWED_USERS or KTI_DISCORD_ALLOWED_CHANNELS — at least one MUST be set. This is checked by `isAuthorized()`. If BOTH are empty, ALL messages are rejected regardless of guild settings.
+  - **Layer 2 (optional)**: KTI_DISCORD_ALLOWED_GUILDS — additional server-level filter, only checked AFTER layer 1 passes.
+  **CRITICAL**: Setting only KTI_DISCORD_ALLOWED_GUILDS is NOT enough. You MUST also set KTI_DISCORD_ALLOWED_USERS (user's Discord ID) or KTI_DISCORD_ALLOWED_CHANNELS (channel ID).
+  To get Discord user ID: Enable Developer Mode in Discord settings → right-click user avatar → Copy User ID.
+  To get channel ID: Right-click channel name → Copy Channel ID.
+  To get guild/server ID: Right-click server name → Copy Server ID.
+  **Discord Bot setup requirements**: In Discord Developer Portal → Bot settings, enable: MESSAGE CONTENT INTENT, SERVER MEMBERS INTENT, PRESENCE INTENT.
+  **DM (private message) support**: DMs work when KTI_DISCORD_ALLOWED_USERS includes the user's ID. DMs are NOT filtered by guild.
 - **Feishu**: Collect KTI_FEISHU_APP_ID and KTI_FEISHU_APP_SECRET (required). KTI_FEISHU_DOMAIN (optional, default: https://open.feishu.cn). KTI_FEISHU_ALLOWED_USERS (optional, empty = allow all).
 - **QQ**: Collect KTI_QQ_APP_ID and KTI_QQ_APP_SECRET (required). KTI_QQ_ALLOWED_USERS (optional).
 
@@ -130,11 +134,11 @@ For each enabled channel, collect credentials. **IMPORTANT platform-specific rul
    KTI_TG_CHAT_ID=99999
    KTI_TG_ALLOWED_USERS=user1,user2
 
-   # Discord
+   # Discord (IMPORTANT: ALLOWED_USERS or ALLOWED_CHANNELS is REQUIRED, not optional!)
    KTI_DISCORD_BOT_TOKEN=...
-   KTI_DISCORD_ALLOWED_USERS=...
-   KTI_DISCORD_ALLOWED_CHANNELS=...
-   KTI_DISCORD_ALLOWED_GUILDS=...
+   KTI_DISCORD_ALLOWED_USERS=...           # REQUIRED: user's Discord ID (right-click avatar → Copy User ID)
+   KTI_DISCORD_ALLOWED_CHANNELS=...        # Alternative to ALLOWED_USERS
+   KTI_DISCORD_ALLOWED_GUILDS=...          # Optional: additional server filter
 
    # Feishu
    KTI_FEISHU_APP_ID=cli_xxx
