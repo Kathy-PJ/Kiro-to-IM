@@ -326,89 +326,86 @@ export class AcpClient extends EventEmitter {
   /**
    * Send a prompt and return a stream event receiver.
    * Method: "session/prompt" (singular!), params: { sessionId, prompt: ContentBlock[] }
-   * The returned async iterable yields StreamEvents until the prompt completes.
+   *
+   * Architecture follows acp-link's Rust pattern:
+   *   1. Create a push queue (channel)
+   *   2. Wire up event listener to push into queue
+   *   3. Return the queue consumer immediately
+   *   4. Send the JSON-RPC request (streaming notifications arrive via listener)
+   *   5. When the response arrives, close the queue
+   *
+   * This avoids race conditions where events arrive before the consumer starts.
    */
   async prompt(sessionId: string, content: ContentBlock[]): Promise<AsyncIterable<StreamEvent>> {
-    const events: StreamEvent[] = [];
-    let resolveNext: ((value: IteratorResult<StreamEvent>) => void) | null = null;
-    let done = false;
+    // Push queue: events are pushed by the listener, consumed by the async iterable.
+    // This mirrors acp-link's mpsc::unbounded_channel pattern.
+    const queue: StreamEvent[] = [];
+    let closed = false;
+    let waiter: ((value: void) => void) | null = null;
 
-    // Set up event listeners for this prompt
-    const onChunk = (event: StreamEvent) => {
-      if (resolveNext) {
-        const resolve = resolveNext;
-        resolveNext = null;
-        resolve({ value: event, done: false });
-      } else {
-        events.push(event);
-      }
+    const push = (event: StreamEvent) => {
+      queue.push(event);
+      if (waiter) { const w = waiter; waiter = null; w(); }
     };
 
-    const onPromptDone = () => {
-      done = true;
-      if (resolveNext) {
-        const resolve = resolveNext;
-        resolveNext = null;
-        resolve({ value: undefined as unknown as StreamEvent, done: true });
-      }
+    const close = () => {
+      closed = true;
+      if (waiter) { const w = waiter; waiter = null; w(); }
     };
 
+    // Wire up event listener BEFORE sending request
+    const onChunk = (event: StreamEvent) => push(event);
     this.on('stream_event', onChunk);
-    this.once('prompt_done', onPromptDone);
 
-    // Send the prompt request (don't await — we want to start consuming events immediately)
-    const promptPromise = this.sendRequest<PromptResponse>('session/prompt', {
-      sessionId,
-      prompt: content.map(block => {
-        switch (block.type) {
-          case 'text':
-            return { type: 'text', text: block.text };
-          case 'image':
-            return { type: 'image', data: block.data, mimeType: block.mimeType };
-          case 'resource_link':
-            return {
-              type: 'resource_link',
-              name: block.name,
-              uri: block.uri,
-              ...(block.mimeType ? { mimeType: block.mimeType } : {}),
-            };
-          default:
-            return block;
-        }
-      }),
+    // Build the prompt content
+    const promptContent = content.map(block => {
+      switch (block.type) {
+        case 'text':
+          return { type: 'text', text: block.text };
+        case 'image':
+          return { type: 'image', data: block.data, mimeType: block.mimeType };
+        case 'resource_link':
+          return {
+            type: 'resource_link',
+            name: block.name,
+            uri: block.uri,
+            ...(block.mimeType ? { mimeType: block.mimeType } : {}),
+          };
+        default:
+          return block;
+      }
     });
 
+    // Send request — response arrives AFTER all notifications
+    const promptPromise = this.sendRequest<PromptResponse>('session/prompt', {
+      sessionId,
+      prompt: promptContent,
+    });
+
+    // When prompt completes (or fails), close the queue
     promptPromise
       .then(() => {
         this.removeListener('stream_event', onChunk);
-        onPromptDone();
+        close();
       })
-      .catch((err) => {
+      .catch(() => {
         this.removeListener('stream_event', onChunk);
-        this.removeListener('prompt_done', onPromptDone);
-        done = true;
-        if (resolveNext) {
-          const resolve = resolveNext;
-          resolveNext = null;
-          resolve({ value: undefined as unknown as StreamEvent, done: true });
-        }
-        this.emit('prompt_error', err);
+        close();
       });
 
-    // Return async iterable
+    // Return async iterable that drains the queue
     return {
       [Symbol.asyncIterator]() {
         return {
-          next(): Promise<IteratorResult<StreamEvent>> {
-            if (events.length > 0) {
-              return Promise.resolve({ value: events.shift()!, done: false });
+          async next(): Promise<IteratorResult<StreamEvent>> {
+            // Drain buffered events first (critical for same-tick delivery)
+            while (queue.length === 0 && !closed) {
+              await new Promise<void>(resolve => { waiter = resolve; });
             }
-            if (done) {
-              return Promise.resolve({ value: undefined as unknown as StreamEvent, done: true });
+            if (queue.length > 0) {
+              return { value: queue.shift()!, done: false };
             }
-            return new Promise((resolve) => {
-              resolveNext = resolve;
-            });
+            return { value: undefined as unknown as StreamEvent, done: true };
           },
         };
       },
