@@ -232,10 +232,8 @@ export class KiroAcpProvider implements LLMProvider {
             // Build content blocks from prompt and files
             const blocks = self.buildContentBlocks(params.prompt, params.files);
 
-            // Build MCP servers list (if MCP server is running)
-            const mcpServers = self.config.mcpPort
-              ? [{ url: `http://127.0.0.1:${self.config.mcpPort}/mcp` }]
-              : undefined;
+            // MCP servers not passed to session (kiro-cli v1.27.2 mcpCapabilities.http=false)
+            const mcpServers = undefined;
 
             // Resolve or create ACP session
             let sessionId: string;
