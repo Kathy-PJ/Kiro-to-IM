@@ -156,9 +156,9 @@ for (const filePath of adapterFiles) {
       await _nativeUpdateCard(_card.token, _card.apiBase, _card.messageId, _finalText);
       _nativeCards.delete(_cid);
       console.log('[feishu-streaming] Card finalized');
-      return true; // Tell bridge-manager: card handled, skip fallback message
+      return false; // Let bridge-manager also handle cleanup (prevents session lock issues)
     }
-    return false; // No native card — let bridge-manager send fallback
+    return false;
     // --- Original onStreamEnd below (unreachable) ---`);
     patched = true;
   }
