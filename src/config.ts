@@ -95,7 +95,7 @@ export function loadConfig(): Config {
     defaultMode: env.get("KTI_DEFAULT_MODE") || "code",
     // Kiro CLI
     kiroCliPath: env.get("KTI_KIRO_CLI_PATH") || undefined,
-    kiroArgs: splitCsv(env.get("KTI_KIRO_ARGS")) || ["acp", "--trust-all-tools"],
+    kiroArgs: splitCsv(env.get("KTI_KIRO_ARGS")) || ["acp"],
     kiroPoolSize: parseInt(env.get("KTI_KIRO_POOL_SIZE") || "4", 10),
     // Kiro Auth
     kiroAuthMethod: (env.get("KTI_KIRO_AUTH_METHOD") || "auto") as Config["kiroAuthMethod"],
