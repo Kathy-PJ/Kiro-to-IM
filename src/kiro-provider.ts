@@ -261,39 +261,45 @@ export class KiroAcpProvider implements LLMProvider {
             // Set up permission handling if not auto-approve
             if (!self.config.autoApprove) {
               client.removeAllListeners('permission_request');
-              client.on('permission_request', async (req: {
-                id: number;
-                options: Array<{ optionId: string; label: string; kind: string }>;
-                toolName?: string;
-                description?: string;
-              }) => {
+              client.on('permission_request', async (req: any) => {
+                // _permId is injected by acp-client.ts for matching the resolve callback
+                const permId = req._permId as string;
+
+                // Extract tool name from various possible field names
+                const toolName = req.toolName || req.tool_name || req.name ||
+                  req.options?.[0]?.label || 'tool';
+
+                // Extract description
+                const description = req.description || req.tool_description ||
+                  req.options?.map((o: any) => o.label).join(', ') || '';
+
+                console.log(`[kiro-provider] Permission request: permId=${permId}, tool=${toolName}`);
+
                 // Emit permission_request SSE for the bridge
-                const toolUseId = `perm-${req.id}`;
                 controller.enqueue(sseEvent('permission_request', {
-                  permissionRequestId: toolUseId,
-                  toolName: req.toolName || 'unknown_tool',
-                  toolInput: { description: req.description },
-                  suggestions: req.options.map((o: { label: string }) => o.label),
+                  permissionRequestId: permId,
+                  toolName,
+                  toolInput: { description },
+                  suggestions: req.options?.map((o: any) => o.label) || [],
                 }));
 
                 // Wait for IM user response
-                const result = await self.pendingPerms.waitFor(toolUseId);
+                const result = await self.pendingPerms.waitFor(permId);
+                console.log(`[kiro-provider] Permission resolved: permId=${permId}, behavior=${result.behavior}`);
 
                 if (result.behavior === 'allow') {
-                  // Find AllowAlways or AllowOnce option
-                  const allowOption = req.options.find((o: { kind: string }) =>
+                  const allowOption = req.options?.find((o: any) =>
                     o.kind === 'allow_always' || o.kind === 'allow_once'
-                  ) || req.options[0];
+                  ) || req.options?.[0];
                   if (allowOption) {
-                    client.resolvePermission(req.id, allowOption.optionId);
+                    client.resolvePermission(permId, allowOption.optionId);
                   }
                 } else {
-                  // Find reject option
-                  const denyOption = req.options.find((o: { kind: string }) =>
+                  const denyOption = req.options?.find((o: any) =>
                     o.kind === 'reject_once' || o.kind === 'reject_always'
-                  ) || req.options[req.options.length - 1];
+                  ) || req.options?.[req.options?.length - 1];
                   if (denyOption) {
-                    client.resolvePermission(req.id, denyOption.optionId);
+                    client.resolvePermission(permId, denyOption.optionId);
                   }
                 }
               });

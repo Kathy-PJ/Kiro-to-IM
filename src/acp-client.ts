@@ -163,6 +163,9 @@ export class AcpClient extends EventEmitter {
       (_conn) => ({
         // Called when agent asks for permission to use a tool
         async requestPermission(params: any) {
+          // Log the full params for debugging
+          console.log('[acp-client] requestPermission params:', JSON.stringify(params).slice(0, 500));
+
           if (autoApprove) {
             const option =
               params.options?.find((o: any) => o.kind === 'allow_always') ||
@@ -175,9 +178,13 @@ export class AcpClient extends EventEmitter {
               },
             };
           }
-          emitter.emit('permission_request', params);
+
+          // Generate a unique permission request ID
+          const permId = `perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          emitter.emit('permission_request', { ...params, _permId: permId });
+
           return new Promise<any>((resolve) => {
-            emitter.once(`permission_resolved_${params.options?.[0]?.optionId}`, resolve);
+            emitter.once(`permission_resolved_${permId}`, resolve);
           });
         },
 
@@ -338,9 +345,10 @@ export class AcpClient extends EventEmitter {
 
   /**
    * Resolve a permission response from external handler.
+   * The permId must match the _permId from the permission_request event.
    */
-  resolvePermission(_requestId: number, optionId: string): void {
-    this.emit(`permission_resolved_${optionId}`, {
+  resolvePermission(permId: string, optionId: string): void {
+    this.emit(`permission_resolved_${permId}`, {
       outcome: { type: 'selected', optionId },
     });
   }
